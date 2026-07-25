@@ -1,32 +1,28 @@
 'use client';
 
 import { useState } from 'react';
-import { removeBackground } from '@imgly/background-removal';
-import { Loader2, Download, RotateCcw, CheckCircle } from 'lucide-react';
+import { Loader2, Download, RotateCcw, CheckCircle, XCircle } from 'lucide-react';
 import ImageUploader from './ImageUploader';
 
 interface ProcessedImage {
   original: File;
-  processed: string;
+  processed: string | null;
   status: 'pending' | 'processing' | 'done' | 'error';
 }
 
 export default function BatchProcessor() {
   const [images, setImages] = useState<ProcessedImage[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [currentProgress, setCurrentProgress] = useState({
-    current: 0,
-    total: 0,
-  });
+  const [currentProgress, setCurrentProgress] = useState({ current: 0, total: 0 });
 
   const handleImageSelect = (file: File) => {
-    setImages((prev) => [...prev, { original: file, processed: '', status: 'pending' }]);
+    setImages((prev) => [...prev, { original: file, processed: null, status: 'pending' }]);
   };
 
   const handleMultipleFiles = (files: FileList) => {
     const newImages = Array.from(files).map((file) => ({
       original: file,
-      processed: '',
+      processed: null,
       status: 'pending' as const,
     }));
     setImages((prev) => [...prev, ...newImages]);
@@ -46,11 +42,18 @@ export default function BatchProcessor() {
       );
 
       try {
-        const blob = await images[i].original.arrayBuffer();
-        const result = await removeBackground(blob);
+        const formData = new FormData();
+        formData.append('image', images[i].original);
 
-        const resultBlob = new Blob([result]);
-        const resultUrl = URL.createObjectURL(resultBlob);
+        const response = await fetch('/api/remove-bg', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) throw new Error('فشل المعالجة');
+
+        const blob = await response.blob();
+        const resultUrl = URL.createObjectURL(blob);
 
         setImages((prev) =>
           prev.map((img, idx) =>
@@ -77,7 +80,7 @@ export default function BatchProcessor() {
       if (img.status === 'done' && img.processed) {
         const link = document.createElement('a');
         link.href = img.processed;
-        link.download = `processed-${index + 1}-${img.original.name}`;
+        link.download = `processed-${index + 1}-${img.original.name.replace(/\.[^/.]+$/, "")}.png`;
         link.click();
       }
     });
@@ -107,9 +110,9 @@ export default function BatchProcessor() {
           />
           <label
             htmlFor="batch-upload"
-            className="inline-block px-6 py-3 bg-primary-500 text-white rounded-lg font-semibold hover:bg-primary-600 cursor-pointer"
+            className="inline-block px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 cursor-pointer"
           >
-            أو اختر عدة صور
+            أو اختر عدة صور للمعالجة
           </label>
         </div>
       </div>
@@ -122,21 +125,26 @@ export default function BatchProcessor() {
         <h3 className="text-lg font-semibold mb-3 text-gray-700">
           الصور المحددة ({images.length})
         </h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-h-96 overflow-y-auto p-2">
           {images.map((img, index) => (
-            <div key={index} className="relative">
+            <div key={index} className="relative border rounded-lg overflow-hidden bg-gray-50">
               <img
                 src={URL.createObjectURL(img.original)}
                 alt={`Image ${index + 1}`}
-                className="w-full h-32 object-cover rounded-lg"
+                className="w-full h-32 object-cover"
               />
               {img.status === 'done' && (
                 <div className="absolute top-2 right-2 bg-green-500 text-white rounded-full p-1">
                   <CheckCircle className="w-5 h-5" />
                 </div>
               )}
+              {img.status === 'error' && (
+                <div className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1">
+                  <XCircle className="w-5 h-5" />
+                </div>
+              )}
               {img.status === 'processing' && (
-                <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-lg">
+                <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
                   <Loader2 className="w-8 h-8 text-white animate-spin" />
                 </div>
               )}
@@ -157,7 +165,7 @@ export default function BatchProcessor() {
           </div>
           <div className="w-full bg-gray-200 rounded-full h-3">
             <div
-              className="bg-primary-500 h-3 rounded-full transition-all"
+              className="bg-blue-600 h-3 rounded-full transition-all"
               style={{
                 width: `${(currentProgress.current / currentProgress.total) * 100}%`,
               }}
@@ -166,23 +174,23 @@ export default function BatchProcessor() {
         </div>
       )}
 
-      <div className="flex gap-4 justify-center">
-        {!isProcessing && images.some((img) => img.status === 'pending') && (
+      <div className="flex gap-4 justify-center flex-wrap">
+        {!isProcessing && images.some((img) => img.status === 'pending' || img.status === 'error') && (
           <button
             onClick={processAllImages}
-            className="px-8 py-3 bg-primary-500 text-white rounded-lg font-semibold hover:bg-primary-600 transition-colors"
+            className="px-8 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
           >
             معالجة جميع الصور
           </button>
         )}
 
-        {images.every((img) => img.status === 'done') && (
+        {images.some((img) => img.status === 'done') && (
           <button
             onClick={downloadAll}
             className="px-8 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center gap-2"
           >
             <Download className="w-5 h-5" />
-            تحميل جميع الصور
+            تحميل الصور الناجحة
           </button>
         )}
 
