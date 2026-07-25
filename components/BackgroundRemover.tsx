@@ -1,8 +1,17 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { pipeline } from '@huggingface/transformers';
+import { useState, useCallback, useEffect } from 'react';
 import { Loader2, Download, RotateCcw, Upload } from 'lucide-react';
+import dynamic from 'next/dynamic';
+
+// تحميل المكتبة ديناميكياً لتجنب أخطاء الخادم (SSR)
+const Pipeline = dynamic(
+  async () => {
+    const { pipeline } = await import('@huggingface/transformers');
+    return { default: pipeline };
+  },
+  { ssr: false }
+);
 
 export default function BackgroundRemover() {
   const [originalImage, setOriginalImage] = useState<string | null>(null);
@@ -17,6 +26,8 @@ export default function BackgroundRemover() {
     if (pipe) return pipe;
     setIsLoadingModel(true);
     try {
+      // استيراد pipeline مباشرة هنا لضمان عملها في المتصفح
+      const { pipeline } = await import('@huggingface/transformers');
       const classifier = await pipeline('image-segmentation', 'briaai/RMBG-1.4', {
         progress_callback: (progressData: any) => {
           if (progressData.status === 'progress') {
