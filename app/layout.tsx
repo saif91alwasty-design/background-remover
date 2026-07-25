@@ -1,13 +1,15 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Tajawal } from 'next/font/google';
 import './globals.css';
 
-const inter = Inter({ subsets: ['arabic', 'latin'] });
+const tajawal = Tajawal({ 
+  subsets: ['arabic'],
+  weight: ['400', '500', '700', '800'] 
+});
 
 export const metadata: Metadata = {
   title: 'إزالة خلفية الصور بالذكاء الاصطناعي - مجاناً',
-  description: 'أداة مجانية لإزالة خلفيات الصور بدقة عالية باستخدام الذكاء الاصطناعي. سريع، آمن، وبدون تسجيل.',
-  keywords: ['إزالة خلفية', 'خلفية الصور', 'ذكاء اصطناعي', 'أدوات مجانية'],
+  description: 'أداة مجانية لإزالة خلفيات الصور بدقة عالية باستخدام الذكاء الاصطناعي.',
 };
 
 export default function RootLayout({
@@ -17,7 +19,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ar" dir="rtl">
-      <body className={inter.className}>{children}</body>
+      <body className={tajawal.className}>{children}</body>
     </html>
   );
 }
