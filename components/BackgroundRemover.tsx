@@ -2,16 +2,6 @@
 
 import { useState, useCallback } from 'react';
 import { Loader2, Download, RotateCcw, Upload } from 'lucide-react';
-import dynamic from 'next/dynamic';
-
-// تحميل المكتبة ديناميكياً لضمان عملها في المتصفح فقط وتجنب أخطاء الخادم
-const removeBackground = dynamic(
-  async () => {
-    const mod = await import('@imgly/background-removal');
-    return mod.removeBackground;
-  },
-  { ssr: false }
-);
 
 export default function BackgroundRemover() {
   const [originalImage, setOriginalImage] = useState<string | null>(null);
@@ -39,11 +29,11 @@ export default function BackgroundRemover() {
     setProgress(0);
 
     try {
-      // استيراد الدالة مباشرة هنا لضمان التقييم في المتصفح
+      // الاستيراد هنا يضمن أن الكود يعمل في المتصفح فقط ويتجنب أخطاء البناء
       const { removeBackground } = await import('@imgly/background-removal');
       
       const blob = await removeBackground(selectedFile, {
-        progress: (key, current, total) => {
+        progress: (key: string, current: number, total: number) => {
           setProgress(Math.round((current / total) * 100));
         },
       });
@@ -109,7 +99,7 @@ export default function BackgroundRemover() {
                 {isProcessing ? (
                   <div className="text-center p-4 bg-white/90 rounded-lg w-full">
                     <Loader2 className="w-12 h-12 text-blue-500 animate-spin mx-auto mb-3" />
-                    <p className="text-gray-700 font-medium">جاري تحميل نموذج الذكاء الاصطناعي...</p>
+                    <p className="text-gray-700 font-medium">جاري المعالجة...</p>
                     <div className="w-full bg-gray-200 rounded-full h-2 mt-3 max-w-xs mx-auto">
                       <div className="bg-blue-500 h-2 rounded-full transition-all" style={{ width: `${progress}%` }} />
                     </div>
