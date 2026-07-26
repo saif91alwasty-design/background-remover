@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Tajawal } from 'next/font/google';
+import { Analytics } from '@vercel/analytics/react';
 import './globals.css';
 
 const tajawal = Tajawal({ 
@@ -8,8 +9,13 @@ const tajawal = Tajawal({
 });
 
 export const metadata: Metadata = {
-  title: 'إزالة خلفية الصور بالذكاء الاصطناعي - مجاناً',
-  description: 'أداة مجانية لإزالة خلفيات الصور بدقة عالية باستخدام الذكاء الاصطناعي.',
+  title: 'إزالة خلفية الصور مجاناً | أداة احترافية وسريعة',
+  description: 'أداة مجانية لإزالة خلفية الصور بدقة عالية. حمّل صورك بصيغة PNG أو WebP فوراً.',
+  
+  // 👇 هذا هو كود إثبات الملكية الخاص بك 👇
+  verification: {
+    google: 'SDBhNAfdK3h5-4vVtq6lXb8Wk4L_pRFkl0XwYyGI6T8',
+  },
 };
 
 export default function RootLayout({
@@ -19,7 +25,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ar" dir="rtl">
-      <body className={tajawal.className}>{children}</body>
+      <body className={tajawal.className}>
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }
