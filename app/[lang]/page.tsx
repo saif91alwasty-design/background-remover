@@ -12,7 +12,9 @@ export async function generateStaticParams() {
 }
 
 export default function LangPage({ params }: PageProps) {
-  const validLang = languages.some(l => l.code === params.lang) ? (params.lang as Language) : 'ar';
+  const validLang = languages.some(l => l.code === params.lang) 
+    ? (params.lang as Language) 
+    : 'ar';
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-12 px-4">
