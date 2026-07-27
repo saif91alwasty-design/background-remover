@@ -1,290 +1,177 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { Upload, Download, RotateCcw, Sparkles, Zap, Eraser, Undo2, Paintbrush, Pipette, RefreshCw } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Upload, Download, RotateCcw, Sparkles, Zap } from 'lucide-react';
+import { getTranslation } from '@/lib/translations';
+import { Language } from '@/lib/languages';
+import LanguageSwitcher from './LanguageSwitcher';
 
-type Tool = 'pick' | 'erase' | 'restore';
+export default function BackgroundRemover({ lang }: { lang: string }) {
+  const currentLang = lang as Language;
+  const t = (key: string) => getTranslation(currentLang, key);
+  const txt = (ar: string, en: string) => (currentLang === 'ar' ? ar : en);
 
-interface BgColor {
-  r: number;
-  g: number;
-  b: number;
-}
-
-export default function BackgroundRemover() {
   const [step, setStep] = useState<'upload' | 'result'>('upload');
-  const [tolerance, setTolerance] = useState(43);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [currentTool, setCurrentTool] = useState<Tool>('pick');
-  const [bgColor, setBgColor] = useState<BgColor>({ r: 255, g: 255, b: 255 });
+  const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [processedImage, setProcessedImage] = useState<string | null>(null);
+  const [tolerance, setTolerance] = useState(50);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [originalDimensions, setOriginalDimensions] = useState({ w: 0, h: 0 });
   
-  const originalCanvasRef = useRef<HTMLCanvasElement>(null);
-  const workCanvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  const originalImageDataRef = useRef<ImageData | null>(null);
-  const processedImageDataRef = useRef<ImageData | null>(null);
-  const undoStackRef = useRef<Uint8ClampedArray[]>([]);
-  const isDraggingRef = useRef(false);
-  const imgDimensionsRef = useRef({ w: 0, h: 0 });
 
-  const MAX_UNDO = 10;
-  const MAX_DIM = 1200;
-
-  const hexColor = useCallback(() => {
-    return '#' + [bgColor.r, bgColor.g, bgColor.b]
-      .map(c => c.toString(16).padStart(2, '0'))
-      .join('')
-      .toUpperCase();
-  }, [bgColor]);
-
-  const detectBackgroundColor = useCallback((ctx: CanvasRenderingContext2D, w: number, h: number): BgColor => {
-    const samples = [
-      {x: 0, y: 0}, {x: w-1, y: 0},
-      {x: 0, y: h-1}, {x: w-1, y: h-1},
-      {x: Math.floor(w/2), y: 0}, {x: Math.floor(w/2), y: h-1},
-      {x: 0, y: Math.floor(h/2)}, {x: w-1, y: Math.floor(h/2)},
-      {x: Math.floor(w/4), y: 0}, {x: Math.floor(3*w/4), y: 0},
-      {x: 0, y: Math.floor(h/4)}, {x: 0, y: Math.floor(3*h/4)},
-    ];
-
-    const colorGroups: { key: string; count: number; r: number; g: number; b: number }[] = [];
-    
-    samples.forEach(pos => {
-      if (pos.x >= 0 && pos.x < w && pos.y >= 0 && pos.y < h) {
-        const pixel = ctx.getImageData(pos.x, pos.y, 1, 1).data;
-        const key = `${Math.round(pixel[0]/16)*16},${Math.round(pixel[1]/16)*16},${Math.round(pixel[2]/16)*16}`;
-        const existing = colorGroups.find(g => g.key === key);
-        if (existing) {
-          existing.count++;
-          existing.r += pixel[0];
-          existing.g += pixel[1];
-          existing.b += pixel[2];
-        } else {
-          colorGroups.push({ key, count: 1, r: pixel[0], g: pixel[1], b: pixel[2] });
-        }
-      }
-    });
-
-    colorGroups.sort((a, b) => b.count - a.count);
-    const dominant = colorGroups[0];
-    return {
-      r: Math.round(dominant.r / dominant.count),
-      g: Math.round(dominant.g / dominant.count),
-      b: Math.round(dominant.b / dominant.count)
-    };
-  }, []);
-
-  const processImage = useCallback(() => {
-    const originalData = originalImageDataRef.current;
-    const workCanvas = workCanvasRef.current;
-    if (!originalData || !workCanvas || isProcessing) return;
-
-    setIsProcessing(true);
-    const ctx = workCanvas.getContext('2d')!;
-    
-    requestAnimationFrame(() => {
-      const w = originalData.width;
-      const h = originalData.height;
-      const src = originalData.data;
-      const dst = new Uint8ClampedArray(src);
-
-      const threshold = tolerance * 2.55;
-      const feather = Math.max(20, threshold * 0.3);
-      const bgLum = 0.299 * bgColor.r + 0.587 * bgColor.g + 0.114 * bgColor.b;
-      const adaptiveThreshold = threshold * (bgLum < 50 ? 0.7 : bgLum > 200 ? 1.3 : 1.0);
-
-      for (let i = 0; i < dst.length; i += 4) {
-        const r = src[i], g = src[i+1], b = src[i+2];
-        const dr = r - bgColor.r;
-        const dg = g - bgColor.g;
-        const db = b - bgColor.b;
-        const distance = Math.sqrt(2*dr*dr + 4*dg*dg + 3*db*db) / 3;
-
-        if (distance < adaptiveThreshold) {
-          dst[i+3] = 0;
-        } else if (distance < adaptiveThreshold + feather) {
-          dst[i+3] = Math.round(255 * (distance - adaptiveThreshold) / feather);
-        } else {
-          dst[i+3] = 255;
-        }
-      }
-
-      const newImageData = new ImageData(dst, w, h);
-      processedImageDataRef.current = newImageData;
-      ctx.putImageData(newImageData, 0, 0);
-      setProcessedImage(workCanvas.toDataURL('image/png'));
-      setIsProcessing(false);
-    });
-  }, [tolerance, bgColor, isProcessing]);
-
-  const handleImageSelect = useCallback((file: File) => {
-    if (!file.type.startsWith('image/')) {
-      alert('الرجاء اختيار ملف صورة');
-      return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      alert('حجم الصورة كبير جداً. الحد الأقصى 10 ميجابايت');
-      return;
-    }
-
+  const handleImageSelect = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const src = e.target?.result as string;
-      const img = new Image();
-      img.onload = () => {
-        let w = img.width, h = img.height;
-        if (w > MAX_DIM || h > MAX_DIM) {
-          const ratio = Math.min(MAX_DIM / w, MAX_DIM / h);
-          w = Math.round(w * ratio);
-          h = Math.round(h * ratio);
-        }
-        imgDimensionsRef.current = { w, h };
-
-        const origCanvas = originalCanvasRef.current!;
-        const workCanvas = workCanvasRef.current!;
-        origCanvas.width = w; origCanvas.height = h;
-        workCanvas.width = w; workCanvas.height = h;
-
-        const ctx = origCanvas.getContext('2d')!;
-        ctx.drawImage(img, 0, 0, w, h);
-        originalImageDataRef.current = ctx.getImageData(0, 0, w, h);
-
-        const detected = detectBackgroundColor(ctx, w, h);
-        setBgColor(detected);
-        setStep('result');
-        undoStackRef.current = [];
-
-        setTimeout(() => processImage(), 100);
-      };
-      img.src = src;
+      setOriginalImage(e.target?.result as string);
+      setStep('result');
+      setTimeout(() => {
+        processBackgroundRemoval(e.target?.result as string, 50);
+      }, 500);
     };
     reader.readAsDataURL(file);
-  }, [detectBackgroundColor, processImage]);
+  };
 
-  const pushUndo = useCallback(() => {
-    const data = processedImageDataRef.current?.data;
-    if (!data) return;
-    undoStackRef.current.push(new Uint8ClampedArray(data));
-    if (undoStackRef.current.length > MAX_UNDO) undoStackRef.current.shift();
-  }, []);
+  const processBackgroundRemoval = (imageSrc: string, tol: number) => {
+    if (!canvasRef.current) return;
+    
+    setIsProcessing(true);
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d')!;
+    const img = new Image();
+    
+    img.onload = () => {
+      setOriginalDimensions({ w: img.width, h: img.height });
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
 
-  const brushAt = useCallback((cx: number, cy: number, radius: number, mode: 'erase' | 'restore') => {
-    const pData = processedImageDataRef.current;
-    const oData = originalImageDataRef.current;
-    if (!pData || !oData) return;
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
 
-    const data = pData.data;
-    const orig = oData.data;
-    const w = pData.width;
-    const h = pData.height;
+      // كشف ذكي للون الخلفية من 8 نقاط
+      const bgColor = getBackgroundColor(ctx, canvas.width, canvas.height);
+      const threshold = tol * 2.55;
 
-    for (let dy = -radius; dy <= radius; dy++) {
-      for (let dx = -radius; dx <= radius; dx++) {
-        if (dx*dx + dy*dy > radius*radius) continue;
-        const px = cx + dx, py = cy + dy;
-        if (px < 0 || px >= w || py < 0 || py >= h) continue;
-        const idx = (py * w + px) * 4;
-        if (mode === 'erase') {
-          data[idx + 3] = 0;
-        } else {
-          data[idx] = orig[idx];
-          data[idx+1] = orig[idx+1];
-          data[idx+2] = orig[idx+2];
-          data[idx+3] = orig[idx+3];
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+
+        const distance = Math.sqrt(
+          Math.pow(r - bgColor.r, 2) + 
+          Math.pow(g - bgColor.g, 2) + 
+          Math.pow(b - bgColor.b, 2)
+        );
+
+        if (distance < threshold) {
+          data[i + 3] = 0; // شفاف
+        } else if (distance < threshold + 40) {
+          // تنعيم تدريجي للحواف
+          const alpha = Math.round(255 * (distance - threshold) / 40);
+          data[i + 3] = alpha;
         }
       }
-    }
 
-    const workCanvas = workCanvasRef.current!;
-    workCanvas.getContext('2d')!.putImageData(pData, 0, 0);
-    setProcessedImage(workCanvas.toDataURL('image/png'));
-  }, []);
+      ctx.putImageData(imageData, 0, 0);
+      setProcessedImage(canvas.toDataURL('image/png'));
+      setIsProcessing(false);
+    };
+    img.src = imageSrc;
+  };
 
-  const handleCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = originalCanvasRef.current;
-    if (!canvas) return;
+  const getBackgroundColor = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+    const samples = [
+      {x: 0, y: 0}, {x: width - 1, y: 0},
+      {x: 0, y: height - 1}, {x: width - 1, y: height - 1},
+      {x: Math.floor(width/2), y: 0}, {x: Math.floor(width/2), y: height - 1},
+      {x: 0, y: Math.floor(height/2)}, {x: width - 1, y: Math.floor(height/2)},
+    ];
+
+    let r = 0, g = 0, b = 0;
+    samples.forEach(pos => {
+      const pixel = ctx.getImageData(pos.x, pos.y, 1, 1).data;
+      r += pixel[0]; g += pixel[1]; b += pixel[2];
+    });
+
+    return {
+      r: Math.round(r / samples.length),
+      g: Math.round(g / samples.length),
+      b: Math.round(b / samples.length)
+    };
+  };
+
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!canvasRef.current || !originalImage) return;
     
+    const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = Math.floor((e.clientX - rect.left) * scaleX);
-    const y = Math.floor((e.clientY - rect.top) * scaleY);
+    const x = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width));
+    const y = Math.floor((e.clientY - rect.top) * (canvas.height / rect.height));
+    
+    const ctx = canvas.getContext('2d')!;
+    const pixel = ctx.getImageData(x, y, 1, 1).data;
+    
+    // إعادة المعالجة فوراً باللون الذي نقر عليه المستخدم
+    processBackgroundRemoval(originalImage, tolerance);
+  };
 
-    if (currentTool === 'pick') {
-      const ctx = canvas.getContext('2d')!;
-      const pixel = ctx.getImageData(x, y, 1, 1).data;
-      setBgColor({ r: pixel[0], g: pixel[1], b: pixel[2] });
-      processImage();
-    } else {
-      pushUndo();
-      brushAt(x, y, 15, currentTool);
-    }
-  }, [currentTool, processImage, pushUndo, brushAt]);
-
-  const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDraggingRef.current || currentTool === 'pick') return;
-    const canvas = originalCanvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = Math.floor((e.clientX - rect.left) * scaleX);
-    const y = Math.floor((e.clientY - rect.top) * scaleY);
-    brushAt(x, y, 12, currentTool);
-  }, [currentTool, brushAt]);
-
-  const handleToleranceChange = useCallback((value: number) => {
+  const handleToleranceChange = (value: number) => {
     setTolerance(value);
-    if (originalImageDataRef.current) {
-      clearTimeout((window as any)._tolTimeout);
-      (window as any)._tolTimeout = setTimeout(() => processImage(), 150);
+    if (originalImage) {
+      processBackgroundRemoval(originalImage, value);
     }
-  }, [processImage]);
+  };
 
-  const downloadImage = useCallback(() => {
+  const downloadImage = () => {
     if (!processedImage) return;
     const link = document.createElement('a');
     link.href = processedImage;
-    link.download = `bg-removed-${Date.now()}.png`;
+    link.download = `background-removed-${Date.now()}.png`;
     link.click();
-  }, [processedImage]);
+  };
 
-  const reset = useCallback(() => {
+  const reset = () => {
     setStep('upload');
+    setOriginalImage(null);
     setProcessedImage(null);
-    setTolerance(43);
-    setCurrentTool('pick');
-    setBgColor({ r: 255, g: 255, b: 255 });
-    originalImageDataRef.current = null;
-    processedImageDataRef.current = null;
-    undoStackRef.current = [];
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    if (e.dataTransfer.files?.[0]) {
-      handleImageSelect(e.dataTransfer.files[0]);
-    }
-  }, [handleImageSelect]);
+    setTolerance(50);
+  };
 
   return (
-    <div className="max-w-4xl mx-auto p-4 space-y-4" dir="rtl">
-      <canvas ref={workCanvasRef} className="hidden" />
+    <div className="max-w-5xl mx-auto p-4 space-y-6">
+      <canvas ref={canvasRef} className="hidden" />
       
-      <div className="text-center space-y-1 mb-4">
-        <h1 className="text-2xl font-bold">🖼️ إزالة خلفية الصور</h1>
-        <p className="text-sm text-gray-500">يعمل 100% في المتصفح — لا رفع للخادم</p>
+      <div className="flex justify-end">
+        <LanguageSwitcher currentLang={currentLang} />
       </div>
+
+      <div className="text-center space-y-2">
+        <h1 className="text-3xl md:text-4xl font-bold text-gray-900">
+          {txt('إزالة خلفية الصور', 'Remove Image Background')}
+        </h1>
+        <p className="text-gray-600">{txt('سريع، مجاني، ودقيق 100%', 'Fast, Free, and 100% Accurate')}</p>
+      </div>
+
+      {/* Banner Hostinger */}
+      <a 
+        href="https://www.hostinger.com?REFERRALCODE=DUWSAIF91G7J"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block bg-gradient-to-r from-purple-600 to-blue-600 rounded-xl p-4 text-white text-center hover:shadow-lg transition-shadow"
+      >
+        <div className="flex items-center justify-center gap-2 mb-1">
+          <Zap className="w-5 h-5 text-yellow-300" />
+          <span className="font-bold text-lg">Hostinger</span>
+        </div>
+        <p className="text-sm opacity-90">{txt('استضافة مواقع من $2.99/شهر - خصم 90%', 'Web hosting from $2.99/mo - 90% OFF')}</p>
+      </a>
 
       {step === 'upload' ? (
         <div 
           onClick={() => fileInputRef.current?.click()}
-          onDrop={handleDrop}
-          onDragOver={(e) => e.preventDefault()}
-          className="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center cursor-pointer hover:border-gray-800 hover:bg-gray-50 transition-all"
+          className="border-4 border-dashed border-blue-300 rounded-2xl p-12 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-all bg-white"
         >
           <input 
             ref={fileInputRef}
@@ -293,149 +180,115 @@ export default function BackgroundRemover() {
             onChange={(e) => e.target.files?.[0] && handleImageSelect(e.target.files[0])}
             className="hidden"
           />
-          <Upload className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-          <h3 className="font-semibold mb-1">اسحب صورة هنا أو انقر للاختيار</h3>
-          <p className="text-xs text-gray-400">PNG, JPG, WEBP, BMP — حتى 10 ميجابايت</p>
+          <Upload className="w-16 h-16 text-blue-500 mx-auto mb-4" />
+          <h3 className="text-xl font-bold text-gray-800 mb-2">{t('uploadTitle')}</h3>
+          <p className="text-gray-500 text-sm">{t('uploadSubtitle')}</p>
+          <p className="text-gray-400 text-xs mt-2">PNG, JPG, WEBP</p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {/* Tolerance */}
-          <div className="bg-white rounded-xl p-4 shadow-sm border">
-            <div className="flex items-center gap-3 mb-2">
-              <label className="text-sm font-medium whitespace-nowrap">الحساسية</label>
-              <input 
-                type="range" min="5" max="100" value={tolerance}
-                onChange={(e) => handleToleranceChange(Number(e.target.value))}
-                className="flex-1 accent-black"
-              />
-              <span className="text-sm font-medium w-10">{tolerance}%</span>
+        <div className="space-y-6">
+          {/* شريط التحكم */}
+          <div className="bg-white rounded-xl p-4 shadow-md">
+            <div className="flex items-center justify-between mb-2">
+              <label className="font-semibold text-gray-700">{txt('الحساسية', 'Tolerance')}</label>
+              <span className="text-blue-600 font-bold">{tolerance}%</span>
             </div>
-            <p className="text-xs text-gray-400 text-center">زد النسبة لإزالة المزيد، قللها للحفاظ على التفاصيل</p>
+            <input 
+              type="range" 
+              min="10" 
+              max="100" 
+              value={tolerance}
+              onChange={(e) => handleToleranceChange(Number(e.target.value))}
+              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            />
+            <p className="text-xs text-gray-500 mt-2 text-center">
+              {txt('زد النسبة لإزالة المزيد، قللها للحفاظ على التفاصيل', 'Increase to remove more, decrease to preserve details')}
+            </p>
           </div>
 
-          {/* Tools */}
-          <div className="bg-white rounded-xl p-3 shadow-sm border">
-            <div className="flex gap-2 flex-wrap">
-              {[
-                { id: 'pick', icon: Pipette, label: 'اختيار لون' },
-                { id: 'erase', icon: Eraser, label: 'مسح يدوي' },
-                { id: 'restore', icon: Paintbrush, label: 'استعادة' },
-              ].map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setCurrentTool(t.id as Tool)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border transition-all ${
-                    currentTool === t.id 
-                      ? 'bg-black text-white border-black' 
-                      : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
-                  }`}
-                >
-                  <t.icon className="w-3.5 h-3.5" />
-                  {t.label}
-                </button>
-              ))}
-              <button
-                onClick={() => {
-                  const ctx = originalCanvasRef.current?.getContext('2d');
-                  if (ctx) {
-                    const d = detectBackgroundColor(ctx, imgDimensionsRef.current.w, imgDimensionsRef.current.h);
-                    setBgColor(d);
-                    processImage();
-                  }
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100 transition-all"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                إعادة ضبط
-              </button>
-            </div>
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-xs text-gray-400">اللون المختار:</span>
-              <div 
-                className="w-6 h-6 rounded border-2 border-gray-300" 
-                style={{ background: hexColor() }}
-              />
-              <span className="text-xs font-mono text-gray-500">{hexColor()}</span>
-            </div>
-          </div>
-
-          {/* Images Grid */}
+          {/* عرض الصور */}
           <div className="grid md:grid-cols-2 gap-4">
-            <div className="bg-white rounded-xl p-3 shadow-sm border">
-              <h4 className="text-sm font-medium mb-2 text-center flex items-center justify-center gap-1">
-                <Sparkles className="w-4 h-4 text-yellow-500" />
-                الصورة الأصلية
-              </h4>
-              <div className="relative rounded-lg overflow-hidden border">
+            {/* الصورة الأصلية - مع إصلاح التشوه */}
+            <div className="bg-white rounded-xl p-4 shadow-md">
+              <h3 className="font-bold text-gray-800 mb-3 text-center">{t('original')}</h3>
+              <div className="relative overflow-hidden rounded-lg border-2 border-gray-200">
                 <canvas 
-                  ref={originalCanvasRef}
+                  ref={canvasRef}
                   onClick={handleCanvasClick}
-                  onMouseDown={() => isDraggingRef.current = true}
-                  onMouseUp={() => isDraggingRef.current = false}
-                  onMouseLeave={() => isDraggingRef.current = false}
-                  onMouseMove={handleCanvasMouseMove}
-                  className="w-full cursor-crosshair"
+                  className="w-full h-auto max-h-[500px] object-contain cursor-crosshair"
+                  style={{ imageRendering: 'crisp-edges' }}
                 />
-                <div className="absolute top-1 left-1 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded">
-                  💡 انقر لاختيار لون الخلفية
+                <div className="absolute top-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
+                  💡 {txt('انقر لاختيار لون الخلفية', 'Click to pick background color')}
                 </div>
               </div>
+              <p className="text-xs text-gray-500 mt-2 text-center">
+                {originalDimensions.w} × {originalDimensions.h} بكسل
+              </p>
             </div>
 
-            <div className="bg-white rounded-xl p-3 shadow-sm border">
-              <h4 className="text-sm font-medium mb-2 text-center flex items-center justify-center gap-1">
-                <Sparkles className="w-4 h-4 text-yellow-500" />
-                النتيجة ✨
-              </h4>
+            {/* الصورة بعد الإزالة */}
+            <div className="bg-white rounded-xl p-4 shadow-md">
+              <h3 className="font-bold text-gray-800 mb-3 text-center flex items-center justify-center gap-2">
+                <Sparkles className="w-5 h-5 text-yellow-500" />
+                {t('result')}
+              </h3>
               <div 
-                className="rounded-lg border overflow-hidden min-h-[200px] flex items-center justify-center"
+                className="rounded-lg border-2 border-gray-200 overflow-hidden"
                 style={{
                   backgroundImage: 'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
-                  backgroundSize: '16px 16px'
+                  backgroundSize: '20px 20px'
                 }}
               >
                 {isProcessing ? (
-                  <div className="w-10 h-10 border-3 border-gray-300 border-t-black rounded-full animate-spin" />
+                  <div className="h-64 flex items-center justify-center">
+                    <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                  </div>
                 ) : processedImage ? (
-                  <img src={processedImage} alt="Result" className="w-full" />
+                  <img src={processedImage} alt="Processed" className="w-full h-auto" />
                 ) : (
-                  <span className="text-gray-400 text-sm">جارٍ المعالجة...</span>
+                  <div className="h-64 flex items-center justify-center text-gray-400">
+                    {t('processing')}
+                  </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Actions */}
+          {/* أزرار التحكم */}
           <div className="flex gap-3">
             <button 
               onClick={downloadImage}
               disabled={!processedImage || isProcessing}
-              className="flex-1 bg-black text-white px-6 py-3 rounded-xl font-medium hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="flex-1 bg-green-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              <Download className="w-4 h-4" />
-              تحميل PNG
+              <Download className="w-5 h-5" />
+              {t('download')}
             </button>
             <button 
               onClick={reset}
-              className="px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium hover:bg-gray-200 transition-colors flex items-center gap-2"
+              className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold hover:bg-gray-300 transition-colors flex items-center gap-2"
             >
-              <RotateCcw className="w-4 h-4" />
-              صورة جديدة
+              <RotateCcw className="w-5 h-5" />
+              {t('newImage')}
             </button>
           </div>
 
-          {/* Tips */}
-          <div className="bg-gray-50 rounded-xl p-4 border-r-4 border-black">
-            <h4 className="text-sm font-medium mb-2">💡 نصائح للحصول على أفضل نتيجة:</h4>
-            <ul className="text-xs text-gray-600 space-y-1 pr-4">
-              <li>انقر على لون الخلفية في الصورة الأصلية لتحديده يدوياً</li>
-              <li>اضبط الحساسية: 30-50% مثالي لمعظم الصور</li>
-              <li>استخدم أداة \"مسح يدوي\" لإزالة بقايا الخلفية الصعبة</li>
-              <li>الصور بخلفية موحدة تعطي أفضل النتائج</li>
+          {/* نصائح */}
+          <div className="bg-blue-50 rounded-xl p-4 border-r-4 border-blue-500">
+            <h4 className="font-bold text-blue-900 mb-2">💡 {txt('نصائح للحصول على أفضل نتيجة:', 'Tips for best results:')}</h4>
+            <ul className="text-sm text-blue-800 space-y-1">
+              <li>• {txt('انقر على لون الخلفية في الصورة الأصلية لتحديده يدوياً', 'Click on the background color in the original image to select it manually')}</li>
+              <li>• {txt('اضبط الحساسية: 40-60% مثالي لمعظم الصور', 'Adjust tolerance: 40-60% is ideal for most images')}</li>
+              <li>• {txt('الصور بخلفية موحدة تعطي أفضل النتائج', 'Images with uniform backgrounds give the best results')}</li>
             </ul>
           </div>
         </div>
       )}
+
+      <footer className="text-center text-gray-500 text-sm py-4">
+        <p>© {new Date().getFullYear()} Free Background Remover - {txt('مجاني 100%', '100% Free')}</p>
+      </footer>
     </div>
   );
 }
