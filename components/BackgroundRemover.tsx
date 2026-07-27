@@ -1,9 +1,16 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { Upload, Download, RotateCcw, Sparkles, Zap } from 'lucide-react';
+import { getTranslation } from '@/lib/translations';
+import { Language } from '@/lib/languages';
+import LanguageSwitcher from './LanguageSwitcher';
 
-export default function BackgroundRemover() {
+export default function BackgroundRemover({ lang }: { lang: string }) {
+  const currentLang = lang as Language;
+  const t = (key: string) => getTranslation(currentLang, key);
+  const txt = (ar: string, en: string) => (currentLang === 'ar' ? ar : en);
+
   const [step, setStep] = useState<'upload' | 'result'>('upload');
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [processedImage, setProcessedImage] = useState<string | null>(null);
@@ -18,7 +25,6 @@ export default function BackgroundRemover() {
     reader.onload = (e) => {
       setOriginalImage(e.target?.result as string);
       setStep('result');
-      // معالجة تلقائية بعد ثانية
       setTimeout(() => {
         processBackgroundRemoval(e.target?.result as string, 50);
       }, 500);
@@ -42,7 +48,7 @@ export default function BackgroundRemover() {
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imageData.data;
 
-      // كشف ذكي للون الخلفية من الزوايا
+      // كشف ذكي للون الخلفية من 8 نقاط
       const bgColor = getBackgroundColor(ctx, canvas.width, canvas.height);
       const threshold = tol * 2.55;
 
@@ -51,7 +57,6 @@ export default function BackgroundRemover() {
         const g = data[i + 1];
         const b = data[i + 2];
 
-        // حساب المسافة من لون الخلفية
         const distance = Math.sqrt(
           Math.pow(r - bgColor.r, 2) + 
           Math.pow(g - bgColor.g, 2) + 
@@ -75,24 +80,17 @@ export default function BackgroundRemover() {
   };
 
   const getBackgroundColor = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-    // أخذ عينات من الزوايا والحواف
     const samples = [
-      {x: 0, y: 0},
-      {x: width - 1, y: 0},
-      {x: 0, y: height - 1},
-      {x: width - 1, y: height - 1},
-      {x: Math.floor(width/2), y: 0},
-      {x: Math.floor(width/2), y: height - 1},
-      {x: 0, y: Math.floor(height/2)},
-      {x: width - 1, y: Math.floor(height/2)},
+      {x: 0, y: 0}, {x: width - 1, y: 0},
+      {x: 0, y: height - 1}, {x: width - 1, y: height - 1},
+      {x: Math.floor(width/2), y: 0}, {x: Math.floor(width/2), y: height - 1},
+      {x: 0, y: Math.floor(height/2)}, {x: width - 1, y: Math.floor(height/2)},
     ];
 
     let r = 0, g = 0, b = 0;
     samples.forEach(pos => {
       const pixel = ctx.getImageData(pos.x, pos.y, 1, 1).data;
-      r += pixel[0];
-      g += pixel[1];
-      b += pixel[2];
+      r += pixel[0]; g += pixel[1]; b += pixel[2];
     });
 
     return {
@@ -113,7 +111,7 @@ export default function BackgroundRemover() {
     const ctx = canvas.getContext('2d')!;
     const pixel = ctx.getImageData(x, y, 1, 1).data;
     
-    // إعادة المعالجة باللون المحدد
+    // إعادة المعالجة فوراً باللون الذي نقر عليه المستخدم
     processBackgroundRemoval(originalImage, tolerance);
   };
 
@@ -143,12 +141,15 @@ export default function BackgroundRemover() {
     <div className="max-w-5xl mx-auto p-4 space-y-6">
       <canvas ref={canvasRef} className="hidden" />
       
-      {/* العنوان */}
+      <div className="flex justify-end">
+        <LanguageSwitcher currentLang={currentLang} />
+      </div>
+
       <div className="text-center space-y-2">
         <h1 className="text-3xl md:text-4xl font-bold text-gray-900">
-          إزالة خلفية الصور
+          {txt('إزالة خلفية الصور', 'Remove Image Background')}
         </h1>
-        <p className="text-gray-600">سريع، مجاني، ودقيق 100%</p>
+        <p className="text-gray-600">{txt('سريع، مجاني، ودقيق 100%', 'Fast, Free, and 100% Accurate')}</p>
       </div>
 
       {/* Banner Hostinger */}
@@ -162,11 +163,10 @@ export default function BackgroundRemover() {
           <Zap className="w-5 h-5 text-yellow-300" />
           <span className="font-bold text-lg">Hostinger</span>
         </div>
-        <p className="text-sm opacity-90">استضافة مواقع من $2.99/شهر - خصم 90%</p>
+        <p className="text-sm opacity-90">{txt('استضافة مواقع من $2.99/شهر - خصم 90%', 'Web hosting from $2.99/mo - 90% OFF')}</p>
       </a>
 
       {step === 'upload' ? (
-        /* خطوة الرفع */
         <div 
           onClick={() => fileInputRef.current?.click()}
           className="border-4 border-dashed border-blue-300 rounded-2xl p-12 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-all bg-white"
@@ -179,17 +179,16 @@ export default function BackgroundRemover() {
             className="hidden"
           />
           <Upload className="w-16 h-16 text-blue-500 mx-auto mb-4" />
-          <h3 className="text-xl font-bold text-gray-800 mb-2">اضغط لرفع صورة</h3>
-          <p className="text-gray-500 text-sm">أو اسحب الصورة وأفلتها هنا</p>
+          <h3 className="text-xl font-bold text-gray-800 mb-2">{t('uploadTitle')}</h3>
+          <p className="text-gray-500 text-sm">{t('uploadSubtitle')}</p>
           <p className="text-gray-400 text-xs mt-2">PNG, JPG, WEBP</p>
         </div>
       ) : (
-        /* خطوة النتيجة */
         <div className="space-y-6">
           {/* شريط التحكم */}
           <div className="bg-white rounded-xl p-4 shadow-md">
             <div className="flex items-center justify-between mb-2">
-              <label className="font-semibold text-gray-700">الحساسية (Tolerance)</label>
+              <label className="font-semibold text-gray-700">{txt('الحساسية', 'Tolerance')}</label>
               <span className="text-blue-600 font-bold">{tolerance}%</span>
             </div>
             <input 
@@ -201,15 +200,14 @@ export default function BackgroundRemover() {
               className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
             />
             <p className="text-xs text-gray-500 mt-2 text-center">
-              زد النسبة لإزالة المزيد، قللها للحفاظ على التفاصيل
+              {txt('زد النسبة لإزالة المزيد، قللها للحفاظ على التفاصيل', 'Increase to remove more, decrease to preserve details')}
             </p>
           </div>
 
           {/* عرض الصور */}
           <div className="grid md:grid-cols-2 gap-4">
-            {/* الصورة الأصلية */}
             <div className="bg-white rounded-xl p-4 shadow-md">
-              <h3 className="font-bold text-gray-800 mb-3 text-center">الصورة الأصلية</h3>
+              <h3 className="font-bold text-gray-800 mb-3 text-center">{t('original')}</h3>
               <div className="relative">
                 <canvas 
                   ref={canvasRef}
@@ -217,16 +215,15 @@ export default function BackgroundRemover() {
                   className="w-full rounded-lg border-2 border-gray-200 cursor-crosshair"
                 />
                 <div className="absolute top-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
-                  💡 انقر لاختيار لون الخلفية
+                  💡 {txt('انقر لاختيار لون الخلفية', 'Click to pick background color')}
                 </div>
               </div>
             </div>
 
-            {/* الصورة بعد الإزالة */}
             <div className="bg-white rounded-xl p-4 shadow-md">
               <h3 className="font-bold text-gray-800 mb-3 text-center flex items-center justify-center gap-2">
                 <Sparkles className="w-5 h-5 text-yellow-500" />
-                بعد إزالة الخلفية
+                {t('result')}
               </h3>
               <div 
                 className="rounded-lg border-2 border-gray-200 overflow-hidden"
@@ -243,7 +240,7 @@ export default function BackgroundRemover() {
                   <img src={processedImage} alt="Processed" className="w-full" />
                 ) : (
                   <div className="h-64 flex items-center justify-center text-gray-400">
-                    جاري المعالجة...
+                    {t('processing')}
                   </div>
                 )}
               </div>
@@ -258,32 +255,31 @@ export default function BackgroundRemover() {
               className="flex-1 bg-green-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               <Download className="w-5 h-5" />
-              تحميل الصورة
+              {t('download')}
             </button>
             <button 
               onClick={reset}
               className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold hover:bg-gray-300 transition-colors flex items-center gap-2"
             >
               <RotateCcw className="w-5 h-5" />
-              صورة جديدة
+              {t('newImage')}
             </button>
           </div>
 
           {/* نصائح */}
           <div className="bg-blue-50 rounded-xl p-4 border-r-4 border-blue-500">
-            <h4 className="font-bold text-blue-900 mb-2">💡 نصائح للحصول على أفضل نتيجة:</h4>
+            <h4 className="font-bold text-blue-900 mb-2">💡 {txt('نصائح للحصول على أفضل نتيجة:', 'Tips for best results:')}</h4>
             <ul className="text-sm text-blue-800 space-y-1">
-              <li>• انقر على لون الخلفية في الصورة الأصلية لتحديده يدوياً</li>
-              <li>• اضبط الحساسية: 40-60% مثالي لمعظم الصور</li>
-              <li>• الصور بخلفية موحدة تعطي أفضل النتائج</li>
+              <li>• {txt('انقر على لون الخلفية في الصورة الأصلية لتحديده يدوياً', 'Click on the background color in the original image to select it manually')}</li>
+              <li>• {txt('اضبط الحساسية: 40-60% مثالي لمعظم الصور', 'Adjust tolerance: 40-60% is ideal for most images')}</li>
+              <li>• {txt('الصور بخلفية موحدة تعطي أفضل النتائج', 'Images with uniform backgrounds give the best results')}</li>
             </ul>
           </div>
         </div>
       )}
 
-      {/* Footer */}
       <footer className="text-center text-gray-500 text-sm py-4">
-        <p>© {new Date().getFullYear()} Free Background Remover - مجاني 100%</p>
+        <p>© {new Date().getFullYear()} Free Background Remover - {txt('مجاني 100%', '100% Free')}</p>
       </footer>
     </div>
   );
