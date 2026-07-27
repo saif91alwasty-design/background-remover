@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import Script from 'next/script';
 import { Upload, Download, RotateCcw, Sparkles, Zap, Crosshair, ShieldCheck, Gauge, HelpCircle, Smartphone, Cpu, Search } from 'lucide-react';
 import { getTranslation } from '@/lib/translations';
 import { Language, getLanguageInfo } from '@/lib/languages';
@@ -9,21 +8,38 @@ import LanguageSwitcher from './LanguageSwitcher';
 
 interface RGB { r: number; g: number; b: number; }
 
-/* ===== وحدة إعلانية محتواة (لا تكسر التصميم عند فشل الإعلان) ===== */
+/* ===== وحدة إعلانية محتواة ومحدثة لضمان تحميل الصور والسكريبت ===== */
 function AdUnit({ slot }: { slot: number }) {
+  const adRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!adRef.current) return;
+
+    // تنظيف الحاوي قبل الإضافة لمنع تكرار عناصر الإعلان
+    adRef.current.innerHTML = '';
+
+    // إنشاء حاوي الإعلان المصدر
+    const container = document.createElement('div');
+    container.id = 'container-db7c9ea9c7974c304a1ad8c9847614d5';
+    adRef.current.appendChild(container);
+
+    // حقن سكريبت الإعلان ديناميكياً
+    const script = document.createElement('script');
+    script.src = 'https://poetrywishing.com/db7c9ea9c7974c304a1ad8c9847614d5/invoke.js';
+    script.async = true;
+    script.setAttribute('data-cfasync', 'false');
+
+    adRef.current.appendChild(script);
+  }, [slot]);
+
   return (
-    <div className="w-full flex justify-center my-2">
+    <div className="w-full flex justify-center my-4">
       <div className="w-full max-w-[320px] text-center">
         <p className="text-[10px] text-slate-400 mb-1 uppercase tracking-widest">Advertisement</p>
-        <div className="relative min-h-[250px] w-[300px] max-w-full mx-auto rounded-xl overflow-hidden bg-slate-50/60 ring-1 ring-slate-100 flex flex-col items-center justify-center">
-          <Script
-            id={`ad-script-${slot}`}
-            src="https://poetrywishing.com/db7c9ea9c7974c304a1ad8c9847614d5/invoke.js"
-            strategy="afterInteractive"
-            data-cfasync="false"
-          />
-          <div id="container-db7c9ea9c7974c304a1ad8c9847614d5" />
-        </div>
+        <div
+          ref={adRef}
+          className="relative min-h-[250px] w-[300px] max-w-full mx-auto rounded-xl overflow-hidden bg-slate-50/60 ring-1 ring-slate-100 flex flex-col items-center justify-center p-2"
+        />
       </div>
     </div>
   );
@@ -35,7 +51,7 @@ export default function BackgroundRemover({ lang }: { lang: string }) {
   const t = (key: string) => getTranslation(currentLang, key);
   const txt = (ar: string, en: string) => (currentLang === 'ar' ? ar : en);
 
-  // 👇 إصلاح الاتجاه واللغة ديناميكياً لكل صفحة
+  // إصلاح الاتجاه واللغة ديناميكياً لكل صفحة
   useEffect(() => {
     const info = getLanguageInfo(currentLang);
     document.documentElement.lang = currentLang;
