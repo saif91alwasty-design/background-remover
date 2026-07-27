@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Upload, Download, RotateCcw, Check, Sparkles, Star, Zap, Shield, Image as ImageIcon, Crop, HelpCircle, Wand2, Target } from 'lucide-react';
+import { Upload, Download, RotateCcw, Check, Sparkles, Wand2 } from 'lucide-react';
 import { getTranslation } from '@/lib/translations';
 import { Language } from '@/lib/languages';
 import LanguageSwitcher from './LanguageSwitcher';
@@ -20,16 +20,10 @@ export default function BackgroundRemover({ lang }: { lang: string }) {
   const [targetHeight, setTargetHeight] = useState<number>(0);
   const [maintainRatio, setMaintainRatio] = useState<boolean>(true);
   const [originalDimensions, setOriginalDimensions] = useState({ w: 0, h: 0 });
-  const [openFaq, setOpenFaq] = useState<number | null>(null);
-  
-  // إعدادات الخلفية المتقدمة
   const [tolerance, setTolerance] = useState(40);
-  const [smoothness, setSmoothness] = useState(3);
   const [selectedColor, setSelectedColor] = useState<{r: number, g: number, b: number} | null>(null);
-  const [useSmartDetection, setUseSmartDetection] = useState(true);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imageRef = useRef<HTMLImageElement>(null);
 
   const handleImageSelect = (file: File) => {
     const reader = new FileReader();
@@ -41,92 +35,12 @@ export default function BackgroundRemover({ lang }: { lang: string }) {
     reader.readAsDataURL(file);
   };
 
-  // حساب المسافة بين لونين (Euclidean Distance)
   const colorDistance = (r1: number, g1: number, b1: number, r2: number, g2: number, b2: number) => {
     return Math.sqrt(
       Math.pow(r1 - r2, 2) + 
       Math.pow(g1 - g2, 2) + 
       Math.pow(b1 - b2, 2)
     );
-  };
-
-  // الكشف الذكي عن لون الخلفية (من الزوايا والحواف)
-  const detectBackgroundColor = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-    const corners = [
-      {x: 0, y: 0},
-      {x: width - 1, y: 0},
-      {x: 0, y: height - 1},
-      {x: width - 1, y: height - 1}
-    ];
-
-    const colors: {r: number, g: number, b: number}[] = [];
-
-    // أخذ عينات من الزوايا
-    corners.forEach(corner => {
-      const pixel = ctx.getImageData(corner.x, corner.y, 1, 1).data;
-      colors.push({ r: pixel[0], g: pixel[1], b: pixel[2] });
-    });
-
-    // أخذ عينات من الحواف (كل 10 بكسل)
-    for (let i = 0; i < width; i += 10) {
-      const top = ctx.getImageData(i, 0, 1, 1).data;
-      const bottom = ctx.getImageData(i, height - 1, 1, 1).data;
-      colors.push({ r: top[0], g: top[1], b: top[2] });
-      colors.push({ r: bottom[0], g: bottom[1], b: bottom[2] });
-    }
-
-    for (let i = 0; i < height; i += 10) {
-      const left = ctx.getImageData(0, i, 1, 1).data;
-      const right = ctx.getImageData(width - 1, i, 1, 1).data;
-      colors.push({ r: left[0], g: left[1], b: left[2] });
-      colors.push({ r: right[0], g: right[1], b: right[2] });
-    }
-
-    // حساب اللون المتوسط
-    const avgColor = colors.reduce((acc, color) => ({
-      r: acc.r + color.r,
-      g: acc.g + color.g,
-      b: acc.b + color.b
-    }), { r: 0, g: 0, b: 0 });
-
-    return {
-      r: Math.round(avgColor.r / colors.length),
-      g: Math.round(avgColor.g / colors.length),
-      b: Math.round(avgColor.b / colors.length)
-    };
-  };
-
-  // خوارزمية تنعيم الحواف (Edge Smoothing)
-  const smoothEdges = (ctx: CanvasRenderingContext2D, width: number, height: number, radius: number) => {
-    const imageData = ctx.getImageData(0, 0, width, height);
-    const data = imageData.data;
-    const newData = new Uint8ClampedArray(data);
-
-    for (let y = radius; y < height - radius; y++) {
-      for (let x = radius; x < width - radius; x++) {
-        const idx = (y * width + x) * 4;
-        
-        // إذا كان البكسل شبه شفاف
-        if (data[idx + 3] > 0 && data[idx + 3] < 255) {
-          let alphaSum = data[idx + 3];
-          let count = 1;
-
-          // أخذ متوسط من البكسلات المحيطة
-          for (let dy = -radius; dy <= radius; dy++) {
-            for (let dx = -radius; dx <= radius; dx++) {
-              if (dx === 0 && dy === 0) continue;
-              const neighborIdx = ((y + dy) * width + (x + dx)) * 4;
-              alphaSum += data[neighborIdx + 3];
-              count++;
-            }
-          }
-
-          newData[idx + 3] = Math.round(alphaSum / count);
-        }
-      }
-    }
-
-    return new ImageData(newData, width, height);
   };
 
   const processImageAutomatically = (imageSrc: string) => {
@@ -146,17 +60,33 @@ export default function BackgroundRemover({ lang }: { lang: string }) {
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imageData.data;
 
-      // الكشف الذكي عن لون الخلفية
+      // تحديد لون الخلفية
       let targetColor = selectedColor;
-      if (useSmartDetection && !targetColor) {
-        targetColor = detectBackgroundColor(ctx, canvas.width, canvas.height);
-      } else if (!targetColor) {
-        // افتراضي: أبيض أو فاتح جداً
-        targetColor = { r: 255, g: 255, b: 255 };
+      if (!targetColor) {
+        // الكشف التلقائي من الزوايا
+        const corners = [
+          {x: 0, y: 0},
+          {x: canvas.width - 1, y: 0},
+          {x: 0, y: canvas.height - 1},
+          {x: canvas.width - 1, y: canvas.height - 1}
+        ];
+        
+        let r = 0, g = 0, b = 0;
+        corners.forEach(c => {
+          const pixel = ctx.getImageData(c.x, c.y, 1, 1).data;
+          r += pixel[0];
+          g += pixel[1];
+          b += pixel[2];
+        });
+        
+        targetColor = {
+          r: Math.round(r / 4),
+          g: Math.round(g / 4),
+          b: Math.round(b / 4)
+        };
       }
 
-      // تطبيق الخوارزمية المتقدمة
-      const maxDistance = tolerance * 2.55; // تحويل النسبة إلى مسافة
+      const maxDistance = tolerance * 2.55;
 
       for (let i = 0; i < data.length; i += 4) {
         const r = data[i];
@@ -166,28 +96,23 @@ export default function BackgroundRemover({ lang }: { lang: string }) {
         const distance = colorDistance(r, g, b, targetColor.r, targetColor.g, targetColor.b);
 
         if (distance <= maxDistance) {
-          // إزالة كاملة
           data[i + 3] = 0;
-        } else if (distance <= maxDistance + 50) {
-          // إزالة تدريجية للحواف
-          const alpha = Math.round(255 * (distance - maxDistance) / 50);
+        } else if (distance <= maxDistance + 30) {
+          const alpha = Math.round(255 * (distance - maxDistance) / 30);
           data[i + 3] = alpha;
         }
       }
 
-      // تنعيم الحواف
-      const smoothedData = smoothEdges(ctx, canvas.width, canvas.height, smoothness);
-      ctx.putImageData(smoothedData, 0, 0);
-
+      ctx.putImageData(imageData, 0, 0);
       setProcessedImage(canvas.toDataURL('image/png'));
       setStep('result');
     };
     img.src = imageSrc;
   };
 
-  // اختيار لون الخلفية بالنقر على الصورة
-  const handleImageClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!imageRef.current || !canvasRef.current) return;
+  // النقر على Canvas لاختيار اللون
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!canvasRef.current) return;
     
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
@@ -251,40 +176,19 @@ export default function BackgroundRemover({ lang }: { lang: string }) {
     setProcessedImage(null);
     setSelectedColor(null);
     setTolerance(40);
-    setSmoothness(3);
   };
-
-  const faqs = [
-    {
-      question: txt('كيف أحصل على أفضل نتائج لإزالة الخلفية؟', 'How can I get the best background removal results?'),
-      answer: txt('استخدم صوراً بخلفية موحدة اللون. اضبط شريط "الحساسية" حسب الحاجة (40-60% مثالي). انقر على لون الخلفية في الصورة لتحديده يدوياً إذا لزم الأمر.', 'Use images with uniform background. Adjust the tolerance slider as needed (40-60% is ideal). Click on the background color in the image to select it manually if needed.'),
-    },
-    {
-      question: txt('ماذا أفعل إذا لم تكن الإزالة دقيقة؟', 'What if the removal is not accurate?'),
-      answer: txt('1) انقر مباشرة على لون الخلفية في الصورة لتحديده بدقة. 2) اضبط "الحساسية" - زد النسبة إذا لم تُزال الخلفية، أو قللها إذا أُزيل جزء من الصورة. 3) اضبط "تنعيم الحواف" لتحسين المظهر.', '1) Click directly on the background color in the image to select it accurately. 2) Adjust tolerance - increase if background not removed, decrease if parts of image are removed. 3) Adjust edge smoothing for better appearance.'),
-    },
-    {
-      question: txt('هل يمكن إزالة خلفية الصور للهاتف؟', 'Can I remove background from mobile photos?'),
-      answer: txt('نعم! موقعنا يعمل على جميع الهواتف (أندرويد وآيفون) بدون تطبيقات. فقط افتح المتصفح وارفع الصورة.', 'Yes! Our site works on all phones (Android & iPhone) without apps. Just open the browser and upload the image.'),
-    },
-  ];
 
   return (
     <div className="max-w-6xl mx-auto p-4 space-y-8">
+      {/* Canvas مخفي للمعالجة فقط */}
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* زر تبديل اللغة */}
       <div className="flex justify-end">
         <LanguageSwitcher currentLang={currentLang} />
       </div>
 
       {/* Banner Hostinger */}
-      <a 
-        href="https://www.hostinger.com?REFERRALCODE=DUWSAIF91G7J"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="block bg-gradient-to-r from-purple-900 via-purple-700 to-blue-600 rounded-2xl p-6 md:p-8 text-white shadow-2xl"
-      >
+      <a href="https://www.hostinger.com?REFERRALCODE=DUWSAIF91G7J" target="_blank" rel="noopener noreferrer" className="block bg-gradient-to-r from-purple-900 via-purple-700 to-blue-600 rounded-2xl p-6 text-white shadow-2xl">
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex-1 text-center md:text-right">
             <h2 className="text-2xl font-bold mb-2">🚀 {txt('ابدأ موقعك مع Hostinger', 'Start Your Website with Hostinger')}</h2>
@@ -296,13 +200,11 @@ export default function BackgroundRemover({ lang }: { lang: string }) {
         </div>
       </a>
 
-      {/* العنوان الرئيسي */}
       <div className="text-center space-y-3">
         <h1 className="text-4xl font-bold text-gray-900">{txt('إزالة خلفية الصور بالذكاء الاصطناعي 2026', 'AI Background Remover 2026')}</h1>
         <p className="text-lg text-gray-600">{txt('دقة عالية - نتائج احترافية في ثوانٍ', 'High Accuracy - Professional Results in Seconds')}</p>
       </div>
 
-      {/* الخطوة 1: رفع */}
       {step === 'upload' && (
         <div className="bg-white rounded-3xl shadow-xl p-8 md:p-12 border-2 border-dashed border-blue-200">
           <div onClick={() => document.getElementById('file-input')?.click()} className="cursor-pointer text-center space-y-6">
@@ -318,7 +220,6 @@ export default function BackgroundRemover({ lang }: { lang: string }) {
         </div>
       )}
 
-      {/* الخطوة 2: معالجة */}
       {step === 'processing' && (
         <div className="bg-white rounded-3xl shadow-xl p-12 text-center space-y-6">
           <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
@@ -326,106 +227,68 @@ export default function BackgroundRemover({ lang }: { lang: string }) {
         </div>
       )}
 
-      {/* الخطوة 3: نتيجة مع أدوات التحكم */}
       {step === 'result' && (
         <div className="space-y-6">
-          {/* أدوات التحكم المتقدمة */}
+          {/* أدوات التحكم */}
           <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-2xl p-6 border-2 border-blue-200">
             <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
               <Wand2 className="w-6 h-6 text-blue-600" />
-              {txt('أدوات التحسين المتقدمة', 'Advanced Optimization Tools')}
+              {txt('أدوات التحسين', 'Optimization Tools')}
             </h3>
             
-            <div className="grid md:grid-cols-2 gap-6">
-              {/* الحساسية */}
-              <div className="bg-white rounded-xl p-4">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  {txt('الحساسية', 'Tolerance')}: {tolerance}%
-                </label>
-                <input 
-                  type="range" 
-                  min="10" 
-                  max="100" 
-                  value={tolerance} 
-                  onChange={(e) => {
-                    setTolerance(Number(e.target.value));
-                    if (originalImage) processImageAutomatically(originalImage);
-                  }}
-                  className="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  {txt('زد النسبة لإزالة المزيد، قللها للحفاظ على التفاصيل', 'Increase to remove more, decrease to preserve details')}
-                </p>
-              </div>
-
-              {/* تنعيم الحواف */}
-              <div className="bg-white rounded-xl p-4">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  {txt('تنعيم الحواف', 'Edge Smoothing')}: {smoothness}px
-                </label>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="10" 
-                  value={smoothness} 
-                  onChange={(e) => {
-                    setSmoothness(Number(e.target.value));
-                    if (originalImage) processImageAutomatically(originalImage);
-                  }}
-                  className="w-full h-2 bg-purple-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  {txt('لجعل الحواف أكثر نعومة وطبيعية', 'To make edges smoother and more natural')}
-                </p>
-              </div>
-            </div>
-
-            {/* زر اختيار اللون */}
-            <div className="mt-4 flex items-center gap-4">
-              <button
-                onClick={() => {
-                  setUseSmartDetection(!useSmartDetection);
+            <div className="bg-white rounded-xl p-4 mb-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                {txt('الحساسية', 'Tolerance')}: {tolerance}%
+              </label>
+              <input 
+                type="range" 
+                min="10" 
+                max="100" 
+                value={tolerance} 
+                onChange={(e) => {
+                  setTolerance(Number(e.target.value));
                   if (originalImage) processImageAutomatically(originalImage);
                 }}
-                className={`px-4 py-2 rounded-lg font-semibold flex items-center gap-2 ${
-                  useSmartDetection ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'
-                }`}
-              >
-                <Target className="w-5 h-5" />
-                {txt('الكشف التلقائي', 'Auto Detect')}
-              </button>
-              
-              {selectedColor && (
-                <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg">
-                  <span className="text-sm font-semibold text-gray-700">{txt('اللون المحدد:', 'Selected Color:')}</span>
-                  <div 
-                    className="w-8 h-8 rounded border-2 border-gray-300"
-                    style={{ backgroundColor: `rgb(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b})` }}
-                  />
-                  <button
-                    onClick={() => {
-                      setSelectedColor(null);
-                      if (originalImage) processImageAutomatically(originalImage);
-                    }}
-                    className="text-red-600 text-sm hover:underline"
-                  >
-                    {txt('إلغاء', 'Clear')}
-                  </button>
-                </div>
-              )}
+                className="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                {txt('زد النسبة لإزالة المزيد، قللها للحفاظ على التفاصيل', 'Increase to remove more, decrease to preserve details')}
+              </p>
             </div>
 
-            <p className="text-sm text-blue-700 mt-4 flex items-center gap-2">
-              <Target className="w-4 h-4" />
-              {txt('💡 انقر على أي مكان في الصورة لاختيار لون الخلفية يدوياً', '💡 Click anywhere on the image to select background color manually')}
+            {selectedColor && (
+              <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg">
+                <span className="text-sm font-semibold text-gray-700">{txt('اللون المحدد:', 'Selected Color:')}</span>
+                <div 
+                  className="w-8 h-8 rounded border-2 border-gray-300"
+                  style={{ backgroundColor: `rgb(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b})` }}
+                />
+                <button
+                  onClick={() => {
+                    setSelectedColor(null);
+                    if (originalImage) processImageAutomatically(originalImage);
+                  }}
+                  className="text-red-600 text-sm hover:underline"
+                >
+                  {txt('إلغاء', 'Clear')}
+                </button>
+              </div>
+            )}
+
+            <p className="text-sm text-blue-700 mt-4">
+              {txt('💡 انقر على الصورة الأصلية لاختيار لون الخلفية يدوياً', '💡 Click on the original image to select background color manually')}
             </p>
           </div>
 
-          {/* عرض الصور */}
+          {/* عرض الصور - Canvas مرئي للنقر */}
           <div className="grid md:grid-cols-2 gap-6">
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h3 className="text-lg font-bold text-gray-800 mb-4 text-center">{t('original')}</h3>
-              <img src={originalImage!} alt="Original" className="w-full rounded-xl" />
+              <canvas 
+                ref={canvasRef}
+                onClick={handleCanvasClick}
+                className="w-full rounded-xl cursor-crosshair border border-gray-200"
+              />
             </div>
             <div className="bg-white rounded-2xl shadow-lg p-6">
               <h3 className="text-lg font-bold text-gray-800 mb-4 text-center">{t('result')}</h3>
@@ -466,31 +329,6 @@ export default function BackgroundRemover({ lang }: { lang: string }) {
         </div>
       )}
 
-      {/* الأسئلة الشائعة */}
-      <section className="bg-white rounded-2xl shadow-lg p-8">
-        <h2 className="text-3xl font-bold text-gray-900 mb-8 text-center">
-          <HelpCircle className="w-10 h-10 text-blue-600 inline mr-2" />
-          {txt('الأسئلة الشائعة', 'FAQ')}
-        </h2>
-        <div className="space-y-3 max-w-4xl mx-auto">
-          {faqs.map((faq, idx) => (
-            <div key={idx} className="border border-gray-200 rounded-lg overflow-hidden">
-              <button
-                onClick={() => setOpenFaq(openFaq === idx ? null : idx)}
-                className="w-full flex items-center justify-between p-5 text-right hover:bg-gray-50"
-              >
-                <span className="font-bold text-gray-800 text-lg">{faq.question}</span>
-                <span className={`text-2xl text-blue-600 transition-transform ${openFaq === idx ? 'rotate-45' : ''}`}>+</span>
-              </button>
-              {openFaq === idx && (
-                <div className="px-5 pb-5 text-gray-600 border-t border-gray-100 pt-4">{faq.answer}</div>
-              )}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Footer */}
       <footer className="bg-gray-100 rounded-2xl p-8 text-center text-gray-600">
         <p>© {new Date().getFullYear()} Free Background Remover</p>
       </footer>
