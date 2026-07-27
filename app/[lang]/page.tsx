@@ -5,7 +5,6 @@ interface PageProps {
   params: { lang: string };
 }
 
-// هذا يخبر Next.js بإنشاء صفحات ثابتة لكل لغة للأرشفة الفورية
 export async function generateStaticParams() {
   return languages.map((lang) => ({
     lang: lang.code,
@@ -13,12 +12,10 @@ export async function generateStaticParams() {
 }
 
 export default function LangPage({ params }: PageProps) {
-  // التحقق من أن اللغة مدعومة، وإلا العودة للعربية
   const validLang = languages.some(l => l.code === params.lang) ? (params.lang as Language) : 'ar';
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-12 px-4">
-      {/* هنا نمرر اللغة للمكون */}
       <BackgroundRemover lang={validLang} />
     </main>
   );
