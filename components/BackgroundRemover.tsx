@@ -15,15 +15,14 @@ function AdUnit({ slot }: { slot: number }) {
     <div className="w-full flex justify-center my-2">
       <div className="w-full max-w-[320px] text-center">
         <p className="text-[10px] text-slate-400 mb-1 uppercase tracking-widest">Advertisement</p>
-        <div className="relative h-[250px] w-[300px] max-w-full mx-auto rounded-xl overflow-hidden bg-slate-50/60 ring-1 ring-slate-100 flex items-center justify-center">
+        <div className="relative min-h-[250px] w-[300px] max-w-full mx-auto rounded-xl overflow-hidden bg-slate-50/60 ring-1 ring-slate-100 flex flex-col items-center justify-center">
           <Script
-            id={`ad-options-${slot}`}
+            id={`ad-script-${slot}`}
+            src="https://poetrywishing.com/db7c9ea9c7974c304a1ad8c9847614d5/invoke.js"
             strategy="afterInteractive"
-            dangerouslySetInnerHTML={{
-              __html: `atOptions={'key':'2adc6989828665bbed972a2ceb97b81f','format':'iframe','height':250,'width':300,'params':{}};`,
-            }}
+            data-cfasync="false"
           />
-          <Script src="https://www.highperformanceformat.com/2adc6989828665bbed972a2ceb97b81f/invoke.js" strategy="afterInteractive" />
+          <div id="container-db7c9ea9c7974c304a1ad8c9847614d5" />
         </div>
       </div>
     </div>
@@ -190,7 +189,6 @@ export default function BackgroundRemover({ lang }: { lang: string }) {
   ];
 
   return (
-    // ⚠️ بدون overflow-hidden حتى لا تُقص قائمة اللغات
     <div className="relative max-w-5xl mx-auto p-4 sm:p-6 space-y-8">
       <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(60%_50%_at_50%_0%,rgba(99,102,241,0.12),transparent),radial-gradient(40%_40%_at_90%_90%,rgba(16,185,129,0.10),transparent)]" />
       <div className="pointer-events-none fixed inset-0 -z-10 opacity-[0.04] [background-image:linear-gradient(#000_1px,transparent_1px),linear-gradient(90deg,#000_1px,transparent_1px)] [background-size:32px_32px]" />
