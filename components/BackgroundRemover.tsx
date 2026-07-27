@@ -1,11 +1,47 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Upload, Download, RotateCcw, Sparkles, Zap } from 'lucide-react';
+import Script from 'next/script';
+import { Upload, Download, RotateCcw, Sparkles, Zap, Crosshair, ShieldCheck, Gauge, HelpCircle, Smartphone, Cpu, Search } from 'lucide-react';
 import { getTranslation } from '@/lib/translations';
 import { Language } from '@/lib/languages';
 import LanguageSwitcher from './LanguageSwitcher';
 
+interface RGB { r: number; g: number; b: number; }
+
+// ===== مكون الوحدة الإعلانية =====
+function AdUnit() {
+  return (
+    <div className="w-full flex justify-center my-6">
+      <div className="text-center">
+        <p className="text-[10px] text-slate-400 mb-1 uppercase tracking-widest">Advertisement</p>
+        <div className="inline-block min-h-[250px] min-w-[300px] bg-slate-50 rounded-xl overflow-hidden ring-1 ring-slate-100">
+          <Script
+            id="ad-options"
+            strategy="afterInteractive"
+            dangerouslySetInnerHTML={{
+              __html: `
+                atOptions = {
+                  'key' : '2adc6989828665bbed972a2ceb97b81f',
+                  'format' : 'iframe',
+                  'height' : 250,
+                  'width' : 300,
+                  'params' : {}
+                };
+              `
+            }}
+          />
+          <Script
+            src="https://www.highperformanceformat.com/2adc6989828665bbed972a2ceb97b81f/invoke.js"
+            strategy="afterInteractive"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== المكون الرئيسي =====
 export default function BackgroundRemover({ lang }: { lang: string }) {
   const currentLang = lang as Language;
   const t = (key: string) => getTranslation(currentLang, key);
@@ -14,280 +50,450 @@ export default function BackgroundRemover({ lang }: { lang: string }) {
   const [step, setStep] = useState<'upload' | 'result'>('upload');
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [processedImage, setProcessedImage] = useState<string | null>(null);
-  const [tolerance, setTolerance] = useState(50);
+  const [tolerance, setTolerance] = useState(45);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [originalDimensions, setOriginalDimensions] = useState({ w: 0, h: 0 });
-  
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [dimensions, setDimensions] = useState({ w: 0, h: 0 });
+  const [pickedColor, setPickedColor] = useState<RGB | null>(null);
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
+
+  const originalCanvasRef = useRef<HTMLCanvasElement>(null);
+  const processCanvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleImageSelect = (file: File) => {
+  const median = (arr: number[]) => {
+    const s = [...arr].sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+  };
+
+  const detectEdgeColor = (ctx: CanvasRenderingContext2D, w: number, h: number): RGB => {
+    const rs: number[] = [], gs: number[] = [], bs: number[] = [];
+    const step = 12;
+    const push = (x: number, y: number) => {
+      const p = ctx.getImageData(x, y, 1, 1).data;
+      rs.push(p[0]); gs.push(p[1]); bs.push(p[2]);
+    };
+    for (let x = 0; x < w; x += step) { push(x, 0); push(x, h - 1); }
+    for (let y = 0; y < h; y += step) { push(0, y); push(w - 1, y); }
+    return { r: median(rs), g: median(gs), b: median(bs) };
+  };
+
+  const paintOriginal = (src: string): Promise<void> =>
+    new Promise((resolve) => {
+      const cv = originalCanvasRef.current!;
+      const ctx = cv.getContext('2d')!;
+      const img = new Image();
+      img.onload = () => {
+        cv.width = img.width;
+        cv.height = img.height;
+        ctx.drawImage(img, 0, 0);
+        setDimensions({ w: img.width, h: img.height });
+        resolve();
+      };
+      img.src = src;
+    });
+
+  const runRemoval = (src: string, tol: number, target: RGB | null) => {
+    const cv = processCanvasRef.current!;
+    const ctx = cv.getContext('2d', { willReadFrequently: true })!;
+    const img = new Image();
+    img.onload = () => {
+      cv.width = img.width;
+      cv.height = img.height;
+      ctx.drawImage(img, 0, 0);
+
+      const bg = target ?? detectEdgeColor(ctx, cv.width, cv.height);
+      const data = ctx.getImageData(0, 0, cv.width, cv.height).data;
+      const thr = tol * 2.55;
+      const feather = 45;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const dr = data[i] - bg.r, dg = data[i + 1] - bg.g, db = data[i + 2] - bg.b;
+        const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+        if (dist < thr) {
+          data[i + 3] = 0;
+        } else if (dist < thr + feather) {
+          data[i + 3] = Math.round(255 * (dist - thr) / feather);
+        }
+      }
+      ctx.putImageData(new ImageData(data, cv.width, cv.height), 0, 0);
+      setProcessedImage(cv.toDataURL('image/png'));
+      setIsProcessing(false);
+    };
+    img.src = src;
+  };
+
+  const handleImageSelect = async (file: File) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
-      setOriginalImage(e.target?.result as string);
+    reader.onload = async (e) => {
+      const src = e.target?.result as string;
+      setOriginalImage(src);
+      setPickedColor(null);
       setStep('result');
-      setTimeout(() => {
-        processBackgroundRemoval(e.target?.result as string, 50);
-      }, 500);
+      setIsProcessing(true);
+      await paintOriginal(src);
+      runRemoval(src, tolerance, null);
     };
     reader.readAsDataURL(file);
   };
 
-  const processBackgroundRemoval = (imageSrc: string, tol: number) => {
-    if (!canvasRef.current) return;
-    
+  const handleOriginalClick = (e: React.MouseEvent<HTMLImageElement>) => {
+    if (!originalCanvasRef.current || !originalImage) return;
+    const cv = originalCanvasRef.current;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) * (cv.width / rect.width));
+    const y = Math.floor((e.clientY - rect.top) * (cv.height / rect.height));
+    const p = cv.getContext('2d')!.getImageData(x, y, 1, 1).data;
+    const color = { r: p[0], g: p[1], b: p[2] };
+    setPickedColor(color);
     setIsProcessing(true);
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d')!;
-    const img = new Image();
-    
-    img.onload = () => {
-      setOriginalDimensions({ w: img.width, h: img.height });
-      canvas.width = img.width;
-      canvas.height = img.height;
-      ctx.drawImage(img, 0, 0);
-
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-
-      // كشف ذكي للون الخلفية من 8 نقاط
-      const bgColor = getBackgroundColor(ctx, canvas.width, canvas.height);
-      const threshold = tol * 2.55;
-
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-
-        const distance = Math.sqrt(
-          Math.pow(r - bgColor.r, 2) + 
-          Math.pow(g - bgColor.g, 2) + 
-          Math.pow(b - bgColor.b, 2)
-        );
-
-        if (distance < threshold) {
-          data[i + 3] = 0; // شفاف
-        } else if (distance < threshold + 40) {
-          // تنعيم تدريجي للحواف
-          const alpha = Math.round(255 * (distance - threshold) / 40);
-          data[i + 3] = alpha;
-        }
-      }
-
-      ctx.putImageData(imageData, 0, 0);
-      setProcessedImage(canvas.toDataURL('image/png'));
-      setIsProcessing(false);
-    };
-    img.src = imageSrc;
+    runRemoval(originalImage, tolerance, color);
   };
 
-  const getBackgroundColor = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-    const samples = [
-      {x: 0, y: 0}, {x: width - 1, y: 0},
-      {x: 0, y: height - 1}, {x: width - 1, y: height - 1},
-      {x: Math.floor(width/2), y: 0}, {x: Math.floor(width/2), y: height - 1},
-      {x: 0, y: Math.floor(height/2)}, {x: width - 1, y: Math.floor(height/2)},
-    ];
-
-    let r = 0, g = 0, b = 0;
-    samples.forEach(pos => {
-      const pixel = ctx.getImageData(pos.x, pos.y, 1, 1).data;
-      r += pixel[0]; g += pixel[1]; b += pixel[2];
-    });
-
-    return {
-      r: Math.round(r / samples.length),
-      g: Math.round(g / samples.length),
-      b: Math.round(b / samples.length)
-    };
-  };
-
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!canvasRef.current || !originalImage) return;
-    
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width));
-    const y = Math.floor((e.clientY - rect.top) * (canvas.height / rect.height));
-    
-    const ctx = canvas.getContext('2d')!;
-    const pixel = ctx.getImageData(x, y, 1, 1).data;
-    
-    // إعادة المعالجة فوراً باللون الذي نقر عليه المستخدم
-    processBackgroundRemoval(originalImage, tolerance);
-  };
-
-  const handleToleranceChange = (value: number) => {
-    setTolerance(value);
-    if (originalImage) {
-      processBackgroundRemoval(originalImage, value);
-    }
+  const handleTolerance = (v: number) => {
+    setTolerance(v);
+    if (originalImage) { setIsProcessing(true); runRemoval(originalImage, v, pickedColor); }
   };
 
   const downloadImage = () => {
     if (!processedImage) return;
-    const link = document.createElement('a');
-    link.href = processedImage;
-    link.download = `background-removed-${Date.now()}.png`;
-    link.click();
+    const a = document.createElement('a');
+    a.href = processedImage;
+    a.download = `no-bg-${Date.now()}.png`;
+    a.click();
   };
 
   const reset = () => {
     setStep('upload');
     setOriginalImage(null);
     setProcessedImage(null);
-    setTolerance(50);
+    setPickedColor(null);
+    setTolerance(45);
   };
 
+  // ===== محتوى SEO: الأسئلة الشائعة =====
+  const faqs = [
+    {
+      q: txt('كيف يمكنني مسح خلفية الصور اون لاين مجاناً؟', 'How can I remove image background online for free?'),
+      a: txt(
+        'يمكنك مسح خلفية الصور اون لاين مجاناً عبر رفع الصورة في أداتنا، وستتم إزالة الخلفية تلقائياً في ثوانٍ. لا حاجة لتحميل برامج أو إنشاء حساب. الأداة تعمل مباشرة في المتصفح على الهاتف والكمبيوتر.',
+        'You can remove image background online for free by uploading your image to our tool. The background is removed automatically in seconds. No software download or account needed. Works directly in the browser on mobile and desktop.'
+      ),
+    },
+    {
+      q: txt('هل يمكن تغيير خلفية الصورة تلقائيا بدون برامج؟', 'Can I change image background automatically without software?'),
+      a: txt(
+        'نعم! أداتنا تتيح لك تغيير خلفية الصورة تلقائيا باستخدام خوارزمية كشف الحواف الذكية. فقط ارفع الصورة وستتم إزالة الخلفية تلقائياً. يمكنك أيضاً النقر على أي لون في الصورة لتحديده يدوياً للحصول على دقة أعلى.',
+        'Yes! Our tool lets you change image background automatically using smart edge detection. Just upload and the background is removed automatically. You can also click any color in the image to select it manually for higher accuracy.'
+      ),
+    },
+    {
+      q: txt('هل تعمل أداة إزالة خلفية الصور للهاتف (أندرويد وآيفون)؟', 'Does the background remover work on mobile (Android & iPhone)?'),
+      a: txt(
+        'بالتأكيد! أداة إزالة خلفية الصور للهاتف تعمل على جميع الأجهزة: أندرويد، آيفون، آيباد، والكمبيوتر. لا حاجة لتطبيقات إضافية — فقط افتح المتصفح وارفع صورتك. المعالجة تتم محلياً على جهازك مما يضمن السرعة والخصوصية.',
+        'Absolutely! The mobile background remover works on all devices: Android, iPhone, iPad, and desktop. No extra apps needed — just open the browser and upload. Processing happens locally on your device ensuring speed and privacy.'
+      ),
+    },
+    {
+      q: txt('ما الفرق بين إزالة الخلفية بالذكاء الاصطناعي والطرق التقليدية؟', 'What is the difference between AI background removal and traditional methods?'),
+      a: txt(
+        'إزالة الخلفية بالذكاء الاصطناعي تستخدم خوارزميات متقدمة لتحديد حدود العنصر الرئيسي بدقة عالية، بينما الطرق التقليدية تتطلب تحديداً يدوياً. أداتنا تجمع بين الكشف التلقائي الذكي والتحكم اليدوي (النقر لاختيار اللون) للحصول على أفضل النتائج في 2026.',
+        'AI background removal uses advanced algorithms to detect the main subject edges with high accuracy, while traditional methods require manual selection. Our tool combines smart auto-detection with manual control (click to pick color) for the best results in 2026.'
+      ),
+    },
+    {
+      q: txt('كيف أفرّغ الصور من الخلفية بجودة عالية؟', 'How do I remove background from images with high quality?'),
+      a: txt(
+        'لتفريغ الصور من الخلفية بجودة عالية: 1) استخدم صوراً بدقة عالية. 2) اضبط الحساسية بين 40-60%. 3) انقر على لون الخلفية يدوياً إذا كان متدرجاً. 4) حمّل النتيجة بصيغة PNG للحفاظ على الشفافية بدون فقدان جودة.',
+        'For high-quality background removal: 1) Use high-resolution images. 2) Set tolerance between 40-60%. 3) Click the background color manually if it is gradient. 4) Download as PNG to preserve transparency without quality loss.'
+      ),
+    },
+    {
+      q: txt('هل موقع إزالة الخلفية مجاناً آمن على خصوصيتي؟', 'Is the free background remover safe for my privacy?'),
+      a: txt(
+        'نعم، موقع إزالة الخلفية مجاناً آمن 100%. جميع عمليات المعالجة تتم محلياً في متصفحك (Client-Side). لا يتم رفع أي صورة إلى خوادمنا، ولا نحتفظ بأي بيانات. صورك تبقى على جهازك فقط.',
+        'Yes, the free background remover is 100% safe. All processing happens locally in your browser (Client-Side). No images are uploaded to our servers, and we store no data. Your images stay on your device only.'
+      ),
+    },
+  ];
+
   return (
-    <div className="max-w-5xl mx-auto p-4 space-y-6">
-      <canvas ref={canvasRef} className="hidden" />
-      
-      <div className="flex justify-end">
+    <div className="relative max-w-5xl mx-auto p-4 sm:p-6 space-y-8 overflow-hidden">
+      {/* خلفية ambient */}
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[radial-gradient(60%_50%_at_50%_0%,rgba(99,102,241,0.12),transparent),radial-gradient(40%_40%_at_90%_90%,rgba(16,185,129,0.10),transparent)]" />
+      <div className="pointer-events-none fixed inset-0 -z-10 opacity-[0.04] [background-image:linear-gradient(#000_1px,transparent_1px),linear-gradient(90deg,#000_1px,transparent_1px)] [background-size:32px_32px]" />
+
+      <canvas ref={originalCanvasRef} className="hidden" />
+      <canvas ref={processCanvasRef} className="hidden" />
+
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-xs font-mono tracking-widest text-indigo-600 uppercase">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+          </span>
+          {txt('يعمل محلياً · 2026', 'Client-side · 2026')}
+        </div>
         <LanguageSwitcher currentLang={currentLang} />
       </div>
 
-      <div className="text-center space-y-2">
-        <h1 className="text-3xl md:text-4xl font-bold text-gray-900">
-          {txt('إزالة خلفية الصور', 'Remove Image Background')}
+      {/* العنوان الرئيسي — محسّن SEO */}
+      <header className="space-y-3">
+        <p className="text-sm font-semibold text-indigo-600 tracking-wide">
+          {txt('مسح خلفية الصور اون لاين · بدون رفع للخادم', 'Remove background online · Zero upload')}
+        </p>
+        <h1 className="text-4xl sm:text-6xl font-black leading-[1.05] text-slate-900">
+          {txt('إزالة خلفية الصورة', 'Remove Image')}{' '}
+          <span className="relative inline-block text-indigo-600">
+            {txt('بالذكاء الاصطناعي', 'Background with AI')}
+            <svg className="absolute -bottom-2 left-0 w-full" height="8" viewBox="0 0 200 8" preserveAspectRatio="none">
+              <path d="M0 5 Q50 0 100 4 T200 3" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" />
+            </svg>
+          </span>
         </h1>
-        <p className="text-gray-600">{txt('سريع، مجاني، ودقيق 100%', 'Fast, Free, and 100% Accurate')}</p>
-      </div>
+        <p className="text-base sm:text-lg text-slate-500 max-w-2xl">
+          {txt(
+            'موقع إزالة الخلفية مجاناً — تفريغ الصور من الخلفية وتغيير خلفية الصورة تلقائيا في ثوانٍ. يعمل على الهاتف والكمبيوتر بدون برامج.',
+            'Free background remover site — remove background from images and change background automatically in seconds. Works on mobile and desktop without software.'
+          )}
+        </p>
+      </header>
 
-      {/* Banner Hostinger */}
-      <a 
-        href="https://www.hostinger.com?REFERRALCODE=DUWSAIF91G7J"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="block bg-gradient-to-r from-purple-600 to-blue-600 rounded-xl p-4 text-white text-center hover:shadow-lg transition-shadow"
-      >
-        <div className="flex items-center justify-center gap-2 mb-1">
-          <Zap className="w-5 h-5 text-yellow-300" />
-          <span className="font-bold text-lg">Hostinger</span>
-        </div>
-        <p className="text-sm opacity-90">{txt('استضافة مواقع من $2.99/شهر - خصم 90%', 'Web hosting from $2.99/mo - 90% OFF')}</p>
-      </a>
+      {/* ===== الوحدة الإعلانية بدلاً من Hostinger ===== */}
+      <AdUnit />
 
+      {/* ===== الأداة ===== */}
       {step === 'upload' ? (
-        <div 
+        <button
           onClick={() => fileInputRef.current?.click()}
-          className="border-4 border-dashed border-blue-300 rounded-2xl p-12 text-center cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-all bg-white"
+          className="group w-full text-right rounded-3xl border-2 border-dashed border-slate-300 hover:border-indigo-500 bg-white/70 backdrop-blur p-10 sm:p-16 transition-all hover:shadow-xl hover:shadow-indigo-100"
         >
-          <input 
+          <input
             ref={fileInputRef}
-            type="file" 
-            accept="image/*" 
+            type="file"
+            accept="image/*"
             onChange={(e) => e.target.files?.[0] && handleImageSelect(e.target.files[0])}
             className="hidden"
           />
-          <Upload className="w-16 h-16 text-blue-500 mx-auto mb-4" />
-          <h3 className="text-xl font-bold text-gray-800 mb-2">{t('uploadTitle')}</h3>
-          <p className="text-gray-500 text-sm">{t('uploadSubtitle')}</p>
-          <p className="text-gray-400 text-xs mt-2">PNG, JPG, WEBP</p>
-        </div>
+          <div className="flex flex-col items-center text-center gap-4">
+            <div className="h-20 w-20 rounded-2xl bg-indigo-50 grid place-items-center group-hover:scale-110 group-hover:bg-indigo-100 transition-all">
+              <Upload className="w-9 h-9 text-indigo-600" />
+            </div>
+            <div>
+              <h3 className="text-2xl font-bold text-slate-900">{t('uploadTitle')}</h3>
+              <p className="text-slate-500 mt-1">{t('uploadSubtitle')}</p>
+            </div>
+            <div className="flex gap-2 text-xs font-mono text-slate-400">
+              <span className="px-2 py-1 rounded bg-slate-100">PNG</span>
+              <span className="px-2 py-1 rounded bg-slate-100">JPG</span>
+              <span className="px-2 py-1 rounded bg-slate-100">WEBP</span>
+            </div>
+          </div>
+        </button>
       ) : (
         <div className="space-y-6">
-          {/* شريط التحكم */}
-          <div className="bg-white rounded-xl p-4 shadow-md">
-            <div className="flex items-center justify-between mb-2">
-              <label className="font-semibold text-gray-700">{txt('الحساسية', 'Tolerance')}</label>
-              <span className="text-blue-600 font-bold">{tolerance}%</span>
+          {/* لوحة التحكم */}
+          <div className="rounded-2xl bg-white p-5 sm:p-6 shadow-sm ring-1 ring-slate-100">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2 font-bold text-slate-800">
+                <Gauge className="w-5 h-5 text-indigo-600" />
+                {txt('حساسية الإزالة', 'Removal Tolerance')}
+              </div>
+              <span className="font-mono text-lg font-black text-indigo-600 tabular-nums">{tolerance}%</span>
             </div>
-            <input 
-              type="range" 
-              min="10" 
-              max="100" 
-              value={tolerance}
-              onChange={(e) => handleToleranceChange(Number(e.target.value))}
-              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            <input
+              type="range" min="5" max="100" value={tolerance}
+              onChange={(e) => handleTolerance(Number(e.target.value))}
+              className="w-full h-2 rounded-full bg-slate-200 appearance-none cursor-pointer accent-indigo-600"
             />
-            <p className="text-xs text-gray-500 mt-2 text-center">
-              {txt('زد النسبة لإزالة المزيد، قللها للحفاظ على التفاصيل', 'Increase to remove more, decrease to preserve details')}
-            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              {pickedColor ? (
+                <div className="flex items-center gap-2 rounded-full bg-indigo-50 pl-3 pr-1 py-1 text-sm">
+                  <Crosshair className="w-4 h-4 text-indigo-600" />
+                  <span className="text-slate-700">{txt('لون محدد يدوياً', 'Manually picked')}</span>
+                  <span className="h-6 w-6 rounded-full ring-2 ring-white shadow" style={{ background: `rgb(${pickedColor.r},${pickedColor.g},${pickedColor.b})` }} />
+                  <button onClick={() => { setPickedColor(null); if (originalImage) { setIsProcessing(true); runRemoval(originalImage, tolerance, null); } }} className="text-xs text-indigo-600 hover:underline px-2">
+                    {txt('إلغاء', 'Clear')}
+                  </button>
+                </div>
+              ) : (
+                <span className="text-xs text-slate-400">{txt('الكشف التلقائي مفعّل — انقر على الصورة للتحديد اليدوي', 'Auto-detect on — click image for manual pick')}</span>
+              )}
+            </div>
           </div>
 
-          {/* عرض الصور */}
-          <div className="grid md:grid-cols-2 gap-4">
-            {/* الصورة الأصلية - مع إصلاح التشوه */}
-            <div className="bg-white rounded-xl p-4 shadow-md">
-              <h3 className="font-bold text-gray-800 mb-3 text-center">{t('original')}</h3>
-              <div className="relative overflow-hidden rounded-lg border-2 border-gray-200">
-                <canvas 
-                  ref={canvasRef}
-                  onClick={handleCanvasClick}
-                  className="w-full h-auto max-h-[500px] object-contain cursor-crosshair"
-                  style={{ imageRendering: 'crisp-edges' }}
-                />
-                <div className="absolute top-2 left-2 bg-blue-600 text-white text-xs px-2 py-1 rounded">
-                  💡 {txt('انقر لاختيار لون الخلفية', 'Click to pick background color')}
-                </div>
+          {/* العرض */}
+          <div className="grid md:grid-cols-2 gap-5">
+            <figure className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+              <figcaption className="flex items-center justify-between mb-3 px-1">
+                <span className="font-bold text-slate-800">{t('original')}</span>
+                <span className="font-mono text-xs text-slate-400">{dimensions.w}×{dimensions.h}</span>
+              </figcaption>
+              <div className="relative rounded-xl overflow-hidden ring-1 ring-slate-200">
+                <img src={originalImage!} alt="original" onClick={handleOriginalClick} className="w-full h-auto block cursor-crosshair select-none" />
+                <span className="absolute top-2 right-2 inline-flex items-center gap-1 bg-slate-900/80 text-white text-[11px] px-2 py-1 rounded-full backdrop-blur">
+                  <Crosshair className="w-3 h-3" /> {txt('انقر لالتقاط اللون', 'Click to pick')}
+                </span>
               </div>
-              <p className="text-xs text-gray-500 mt-2 text-center">
-                {originalDimensions.w} × {originalDimensions.h} بكسل
-              </p>
-            </div>
+            </figure>
 
-            {/* الصورة بعد الإزالة */}
-            <div className="bg-white rounded-xl p-4 shadow-md">
-              <h3 className="font-bold text-gray-800 mb-3 text-center flex items-center justify-center gap-2">
-                <Sparkles className="w-5 h-5 text-yellow-500" />
-                {t('result')}
-              </h3>
-              <div 
-                className="rounded-lg border-2 border-gray-200 overflow-hidden"
-                style={{
-                  backgroundImage: 'linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%)',
-                  backgroundSize: '20px 20px'
-                }}
+            <figure className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+              <figcaption className="flex items-center gap-2 mb-3 px-1 font-bold text-slate-800">
+                <Sparkles className="w-5 h-5 text-amber-500" /> {t('result')}
+              </figcaption>
+              <div
+                className="relative rounded-xl overflow-hidden ring-1 ring-slate-200 min-h-[180px] grid place-items-center"
+                style={{ backgroundImage: 'conic-gradient(#e2e8f0 90deg, #fff 0 180deg, #e2e8f0 0 270deg, #fff 0)', backgroundSize: '24px 24px' }}
               >
                 {isProcessing ? (
-                  <div className="h-64 flex items-center justify-center">
-                    <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                  <div className="flex flex-col items-center gap-3 py-10">
+                    <div className="h-10 w-10 rounded-full border-[3px] border-indigo-200 border-t-indigo-600 animate-spin" />
+                    <span className="text-sm text-slate-500">{t('processing')}</span>
                   </div>
                 ) : processedImage ? (
-                  <img src={processedImage} alt="Processed" className="w-full h-auto" />
-                ) : (
-                  <div className="h-64 flex items-center justify-center text-gray-400">
-                    {t('processing')}
-                  </div>
-                )}
+                  <img src={processedImage} alt="result" className="w-full h-auto block" />
+                ) : null}
               </div>
-            </div>
+            </figure>
           </div>
 
-          {/* أزرار التحكم */}
-          <div className="flex gap-3">
-            <button 
-              onClick={downloadImage}
-              disabled={!processedImage || isProcessing}
-              className="flex-1 bg-green-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              <Download className="w-5 h-5" />
-              {t('download')}
+          {/* الأزرار */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button onClick={downloadImage} disabled={!processedImage || isProcessing} className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-4 transition-colors shadow-lg shadow-emerald-200">
+              <Download className="w-5 h-5" /> {t('download')}
             </button>
-            <button 
-              onClick={reset}
-              className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-bold hover:bg-gray-300 transition-colors flex items-center gap-2"
-            >
-              <RotateCcw className="w-5 h-5" />
-              {t('newImage')}
+            <button onClick={reset} className="inline-flex items-center justify-center gap-2 rounded-xl bg-white ring-1 ring-slate-200 hover:bg-slate-50 text-slate-700 font-bold py-4 px-6 transition-colors">
+              <RotateCcw className="w-5 h-5" /> {t('newImage')}
             </button>
-          </div>
-
-          {/* نصائح */}
-          <div className="bg-blue-50 rounded-xl p-4 border-r-4 border-blue-500">
-            <h4 className="font-bold text-blue-900 mb-2">💡 {txt('نصائح للحصول على أفضل نتيجة:', 'Tips for best results:')}</h4>
-            <ul className="text-sm text-blue-800 space-y-1">
-              <li>• {txt('انقر على لون الخلفية في الصورة الأصلية لتحديده يدوياً', 'Click on the background color in the original image to select it manually')}</li>
-              <li>• {txt('اضبط الحساسية: 40-60% مثالي لمعظم الصور', 'Adjust tolerance: 40-60% is ideal for most images')}</li>
-              <li>• {txt('الصور بخلفية موحدة تعطي أفضل النتائج', 'Images with uniform backgrounds give the best results')}</li>
-            </ul>
           </div>
         </div>
       )}
 
-      <footer className="text-center text-gray-500 text-sm py-4">
-        <p>© {new Date().getFullYear()} Free Background Remover - {txt('مجاني 100%', '100% Free')}</p>
+      {/* ===== وحدة إعلانية ثانية بعد الأداة ===== */}
+      {step === 'result' && <AdUnit />}
+
+      {/* ===== محتوى SEO الغني ===== */}
+      <section className="rounded-2xl bg-white p-6 sm:p-8 shadow-sm ring-1 ring-slate-100 space-y-8">
+        
+        {/* قسم: لماذا أداتنا */}
+        <div>
+          <h2 className="text-2xl sm:text-3xl font-black text-slate-900 mb-6">
+            {txt('لماذا تختار موقعنا لإزالة خلفية الصورة؟', 'Why Choose Our Background Remover?')}
+          </h2>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[
+              { icon: Cpu, title: txt('إزالة الخلفية بالذكاء الاصطناعي', 'AI Background Removal'), desc: txt('خوارزمية كشف الحواف الذكية تحدد العنصر الرئيسي بدقة عالية وتغير خلفية الصورة تلقائيا', 'Smart edge detection algorithm identifies the main subject with high accuracy and changes background automatically') },
+              { icon: Smartphone, title: txt('إزالة خلفية الصور للهاتف', 'Mobile Background Removal'), desc: txt('تعمل على أندرويد وآيفون بدون تطبيقات إضافية — فقط افتح المتصفح وابدأ فوراً', 'Works on Android & iPhone without extra apps — just open the browser and start immediately') },
+              { icon: ShieldCheck, title: txt('موقع إزالة الخلفية مجاناً وآمن', 'Free & Safe Background Remover'), desc: txt('معالجة محلية 100% — لا تُرفع صورك لأي خادم. خصوصيتك محمية بالكامل', '100% local processing — your images are never uploaded. Your privacy is fully protected') },
+              { icon: Zap, title: txt('مسح خلفية الصور اون لاين فوري', 'Instant Online Background Removal'), desc: txt('تفريغ الصور من الخلفية في أقل من 3 ثوانٍ بدون انتظار أو طوابير', 'Remove background from images in under 3 seconds without waiting or queues') },
+              { icon: Crosshair, title: txt('تحكم يدوي دقيق', 'Precise Manual Control'), desc: txt('انقر على أي لون في الصورة لتحديده كخلفية — مثالي للصور المعقدة والمتدرجة', 'Click any color in the image to select it as background — perfect for complex and gradient images') },
+              { icon: Search, title: txt('بدون تسجيل أو برامج', 'No Signup or Software'), desc: txt('لا حاجة لإنشاء حساب أو تحميل برامج — أداة ويب تعمل مباشرة في المتصفح', 'No account or software download needed — a web tool that works directly in the browser') },
+            ].map((f, i) => (
+              <div key={i} className="rounded-xl bg-slate-50 p-5 hover:bg-indigo-50 transition-colors group">
+                <f.icon className="w-6 h-6 text-indigo-600 mb-3 group-hover:scale-110 transition-transform" />
+                <h3 className="font-bold text-slate-800 mb-1">{f.title}</h3>
+                <p className="text-sm text-slate-500 leading-relaxed">{f.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* قسم: كيفية الاستخدام */}
+        <div>
+          <h2 className="text-2xl sm:text-3xl font-black text-slate-900 mb-6">
+            {txt('كيفية مسح خلفية الصور اون لاين في 4 خطوات', 'How to Remove Background Online in 4 Steps')}
+          </h2>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              { n: '01', title: txt('ارفع صورتك', 'Upload Image'), desc: txt('اضغط على منطقة الرفع أو اسحب الصورة. ندعم PNG و JPG و WEBP', 'Click the upload area or drag your image. We support PNG, JPG, and WEBP') },
+              { n: '02', title: txt('كشف تلقائي ذكي', 'Smart Auto-Detect'), desc: txt('خوارزمية وسيط الحواف تحدد لون الخلفية تلقائياً وتبدأ الإزالة فوراً', 'Edge-median algorithm detects background color automatically and starts removal instantly') },
+              { n: '03', title: txt('تحكّم يدوي', 'Manual Control'), desc: txt('انقر على أي لون في الصورة أو اضبط الحساسية للحصول على النتيجة المثالية', 'Click any color in the image or adjust tolerance for the perfect result') },
+              { n: '04', title: txt('حمّل النتيجة', 'Download Result'), desc: txt('احفظ الصورة بخلفية شفافة بصيغة PNG عالية الجودة مجاناً', 'Save the image with transparent background in high-quality PNG format for free') },
+            ].map((s, i) => (
+              <div key={i} className="relative rounded-xl border border-slate-200 p-5 hover:border-indigo-300 transition-colors">
+                <span className="text-4xl font-black text-indigo-100">{s.n}</span>
+                <h3 className="font-bold text-slate-800 mt-2 mb-1">{s.title}</h3>
+                <p className="text-sm text-slate-500">{s.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* قسم: استخدامات */}
+        <div>
+          <h2 className="text-2xl sm:text-3xl font-black text-slate-900 mb-6">
+            {txt('استخدامات تفريغ الصور من الخلفية', 'Uses for Background Removal')}
+          </h2>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[
+              { icon: '🛒', title: txt('المتاجر الإلكترونية', 'E-commerce'), desc: txt('صور منتجات احترافية بخلفية بيضاء أو شفافة لمتجرك', 'Professional product images with white or transparent background') },
+              { icon: '📸', title: txt('التصوير الفوتوغرافي', 'Photography'), desc: txt('تعديل الصور الشخصية والعائلية وإزالة الخلفيات المشتتة', 'Edit personal and family photos, remove distracting backgrounds') },
+              { icon: '🎨', title: txt('التصميم الجرافيكي', 'Graphic Design'), desc: txt('عزل العناصر لاستخدامها في الملصقات والإعلانات والتصاميم', 'Isolate elements for posters, ads, and designs') },
+              { icon: '📱', title: txt('السوشيال ميديا', 'Social Media'), desc: txt('منشورات احترافية لإنستغرام وتيك توك ويوتيوب', 'Professional posts for Instagram, TikTok, and YouTube') },
+              { icon: '', title: txt('السيرة الذاتية', 'Resume / CV'), desc: txt('صور رسمية احترافية للسيرة الذاتية و LinkedIn', 'Professional official photos for CV and LinkedIn') },
+              { icon: '🖼️', title: txt('الطباعة واللافتات', 'Print & Banners'), desc: txt('تصاميم إعلانية جاهزة للطباعة بخلفيات شفافة', 'Print-ready advertising designs with transparent backgrounds') },
+            ].map((u, i) => (
+              <div key={i} className="flex items-start gap-3 rounded-xl bg-slate-50 p-4">
+                <span className="text-2xl">{u.icon}</span>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm">{u.title}</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">{u.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* قسم: الأسئلة الشائعة */}
+        <div>
+          <h2 className="text-2xl sm:text-3xl font-black text-slate-900 mb-6 flex items-center gap-3">
+            <HelpCircle className="w-8 h-8 text-indigo-600" />
+            {txt('الأسئلة الشائعة', 'Frequently Asked Questions')}
+          </h2>
+          <div className="space-y-3">
+            {faqs.map((faq, idx) => (
+              <div key={idx} className="rounded-xl border border-slate-200 overflow-hidden">
+                <button
+                  onClick={() => setOpenFaq(openFaq === idx ? null : idx)}
+                  className="w-full flex items-center justify-between p-4 sm:p-5 text-right hover:bg-slate-50 transition-colors"
+                >
+                  <span className="font-bold text-slate-800 text-sm sm:text-base">{faq.q}</span>
+                  <span className={`text-xl text-indigo-600 transition-transform shrink-0 mr-3 ${openFaq === idx ? 'rotate-45' : ''}`}>+</span>
+                </button>
+                {openFaq === idx && (
+                  <div className="px-4 sm:px-5 pb-5 text-sm text-slate-600 leading-relaxed border-t border-slate-100 pt-3">
+                    {faq.a}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* قسم: نصائح */}
+        <div className="rounded-xl bg-gradient-to-r from-indigo-50 to-emerald-50 p-6 border-r-4 border-indigo-500">
+          <h3 className="font-black text-slate-900 text-lg mb-3">
+            💡 {txt('نصائح للحصول على أفضل نتائج إزالة الخلفية', 'Tips for Best Background Removal Results')}
+          </h3>
+          <ul className="text-sm text-slate-700 space-y-2">
+            <li>• {txt('استخدم صوراً بدقة عالية (HD أو أعلى) للحصول على حواف نظيفة', 'Use high-resolution images (HD or higher) for clean edges')}</li>
+            <li>• {txt('الصور بخلفية موحدة اللون (أبيض، أزرق، أخضر) تعطي أفضل النتائج', 'Images with uniform background color (white, blue, green) give the best results')}</li>
+            <li>• {txt('اضبط الحساسية بين 40-60% لمعظم الصور، وزدها للخلفيات المعقدة', 'Set tolerance between 40-60% for most images, increase for complex backgrounds')}</li>
+            <li>• {txt('انقر على لون الخلفية يدوياً إذا كان متدرجاً أو متعدد الألوان', 'Click the background color manually if it is gradient or multi-colored')}</li>
+            <li>• {txt('حمّل بصيغة PNG للحفاظ على الشفافية، أو WebP لمواقع الويب (أصغر حجماً)', 'Download as PNG to preserve transparency, or WebP for websites (smaller size)')}</li>
+          </ul>
+        </div>
+      </section>
+
+      {/* ===== وحدة إعلانية ثالثة في الأسفل ===== */}
+      <AdUnit />
+
+      {/* Footer */}
+      <footer className="text-center text-xs text-slate-400 pt-4 space-y-1">
+        <p className="font-semibold text-slate-500">
+          {txt('موقع إزالة الخلفية مجاناً · مسح خلفية الصور اون لاين · تفريغ الصور من الخلفية', 'Free Background Remover · Remove Background Online · Image Background Removal')}
+        </p>
+        <p>© {new Date().getFullYear()} · {txt('جميع الحقوق محفوظة', 'All rights reserved')}</p>
       </footer>
     </div>
   );
