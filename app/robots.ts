@@ -1,4 +1,5 @@
 import { MetadataRoute } from 'next';
+import { languages } from '@/lib/languages';
 
 export default function robots(): MetadataRoute.Robots {
   const baseUrl = 'https://bg-remover99.vercel.app';
@@ -7,8 +8,7 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: '*',
       allow: '/',
-      // منع فهرسة بعض المسارات غير المهمة (اختياري)
-      disallow: ['/api/', '/_next/', '/admin/'],
+      disallow: ['/api/', '/_next/'],
     },
     sitemap: `${baseUrl}/sitemap.xml`,
   };
