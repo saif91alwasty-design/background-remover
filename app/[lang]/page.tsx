@@ -1,11 +1,11 @@
 import BackgroundRemover from '@/components/BackgroundRemover';
-import { languages, getLanguageInfo, Language } from '@/lib/languages';
-import { translations } from '@/lib/translations';
+import { languages, Language } from '@/lib/languages';
 
 interface PageProps {
   params: { lang: string };
 }
 
+// هذا يخبر Next.js بإنشاء صفحات ثابتة لكل لغة للأرشفة الفورية
 export async function generateStaticParams() {
   return languages.map((lang) => ({
     lang: lang.code,
@@ -13,13 +13,13 @@ export async function generateStaticParams() {
 }
 
 export default function LangPage({ params }: PageProps) {
-  const lang = params.lang as Language;
-  const langInfo = getLanguageInfo(lang);
-  const t = translations[lang] || translations['en'];
+  // التحقق من أن اللغة مدعومة، وإلا العودة للعربية
+  const validLang = languages.some(l => l.code === params.lang) ? (params.lang as Language) : 'ar';
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 py-12 px-4">
-      <BackgroundRemover lang={lang} />
+      {/* هنا نمرر اللغة للمكون */}
+      <BackgroundRemover lang={validLang} />
     </main>
   );
 }
