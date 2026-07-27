@@ -1,21 +1,18 @@
 import { MetadataRoute } from 'next';
+import { languages } from '@/lib/languages';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl = 'https://bg-remover99.vercel.app';
   
-  return [
-    {
-      url: baseUrl,
-      lastModified: new Date(),
-      changeFrequency: 'daily',
-      priority: 1,
+  return languages.map((lang) => ({
+    url: `${baseUrl}/${lang.code}`,
+    lastModified: new Date(),
+    changeFrequency: 'daily' as const,
+    priority: lang.code === 'ar' ? 1 : 0.9,
+    alternates: {
+      languages: Object.fromEntries(
+        languages.map((l) => [l.code, `${baseUrl}/${l.code}`])
+      ),
     },
-    // يمكنك إضافة صفحات أخرى هنا إذا أضفت صفحات جديدة للموقع
-    // {
-    //   url: `${baseUrl}/about`,
-    //   lastModified: new Date(),
-    //   changeFrequency: 'monthly',
-    //   priority: 0.8,
-    // },
-  ];
+  }));
 }
