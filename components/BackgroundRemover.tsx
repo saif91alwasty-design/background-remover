@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import Script from 'next/script'; // تم إضافة هذا السطر لدعم الإعلانات بشكل صحيح في Next.js
 import { Upload, Download, RotateCcw, Sparkles, Zap, Crosshair, ShieldCheck, Gauge, HelpCircle, Smartphone, Cpu, Search } from 'lucide-react';
 import { getTranslation } from '@/lib/translations';
 import { Language, getLanguageInfo } from '@/lib/languages';
@@ -433,6 +434,12 @@ export default function BackgroundRemover({ lang }: { lang: string }) {
         <p className="font-semibold text-slate-500">{txt('موقع إزالة الخلفية مجاناً · مسح خلفية الصور اون لاين · تفريغ الصور من الخلفية', 'Free Background Remover · Remove Background Online · Image Background Removal')}</p>
         <p>© {new Date().getFullYear()} · {txt('جميع الحقوق محفوظة', 'All rights reserved')}</p>
       </footer>
+
+      {/* ===== إعلان Social Bar (مُضاف بطريقة Next.js الآمنة) ===== */}
+      <Script 
+        src="https://poetrywishing.com/e9/0f/0c/e90f0c138069a5e2d6d624366420b4a8.js" 
+        strategy="afterInteractive" 
+      />
     </div>
   );
 }
